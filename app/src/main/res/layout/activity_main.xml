@@ -71,6 +71,7 @@
             <ImageView android:id="@+id/ivScanLoading" android:layout_width="11dp" android:layout_height="11dp" android:layout_gravity="center_vertical|end" android:layout_marginEnd="4dp" android:src="@android:drawable/ic_popup_sync" android:tint="#EAF7FF" android:visibility="gone" />
         </FrameLayout>
         <TextView android:id="@+id/btnAdd" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="＋ 添加" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
+        <TextView android:id="@+id/btnOrientation" android:layout_width="40dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="⟲" android:textColor="#071221" android:textSize="10sp" android:textStyle="bold" />
         <TextView android:id="@+id/btnSettings" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="⚙ 设置" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
     </LinearLayout>
 
@@ -226,7 +227,95 @@ android:padding="5dp">
                 </LinearLayout>
             </LinearLayout>
             </ScrollView>
-        </FrameLayout>
+    </FrameLayout>
+        </LinearLayout>
     </LinearLayout>
+
+    <!-- 竖屏模式容器 -->
+    <LinearLayout
+        android:id="@+id/portraitContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <!-- 竖屏顶部标题栏 -->
+        <LinearLayout
+            android:id="@+id/portraitTopBar"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:background="#0F1524">
+
+            <TextView
+                android:id="@+id/tvPortraitLogo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="❄KamiGAL"
+                android:textColor="@color/yh_text"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/pageContent"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <LinearLayout
+            android:id="@+id/bottomNav"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:background="#161B2E">
+
+            <TextView
+                android:id="@+id/navLibrary"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="📖 游戏库"
+                android:textColor="#B9D8FF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/navSearchPage"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="🔍 搜索"
+                android:textColor="#B9D8FF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/navProfile"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="👤 个人"
+                android:textColor="#B9D8FF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/navSettingsPage"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="⚙ 设置"
+                android:textColor="#B9D8FF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </LinearLayout>
     </LinearLayout>
 </FrameLayout>

@@ -1,51 +1,308 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:padding="18dp"
+    android:layout_height="match_parent"
     android:background="@drawable/bg_dialog">
 
-    <FrameLayout
-        android:layout_width="180dp"
-        android:layout_height="250dp"
-        android:background="@drawable/bg_cover_placeholder">
-        <ImageView
-            android:id="@+id/detailCover"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="centerCrop"
-            android:visibility="gone" />
-        <TextView
-            android:id="@+id/detailCoverPlaceholder"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:text="YH"
-            android:textColor="@color/yh_text"
-            android:textSize="34sp"
-            android:textStyle="bold" />
-    </FrameLayout>
-
     <LinearLayout
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:layout_marginStart="18dp"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:padding="16dp">
 
-        <TextView android:id="@+id/detailTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Title" android:textColor="@color/yh_text" android:textSize="24sp" android:textStyle="bold" />
-        <TextView android:id="@+id/detailInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:textColor="@color/yh_text_muted" android:textSize="13sp" android:lineSpacingExtra="4dp" />
-        <TextView android:id="@+id/detailPath" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:maxLines="3" android:ellipsize="middle" android:textColor="@color/yh_text_muted" android:textSize="12sp" />
+        <!-- 封面 + 基本信息行 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
 
-        <Space android:layout_width="match_parent" android:layout_height="16dp" />
+            <FrameLayout
+                android:id="@+id/detailCoverFrame"
+                android:layout_width="140dp"
+                android:layout_height="200dp"
+                android:background="@drawable/bg_cover_placeholder">
+                <ImageView
+                    android:id="@+id/detailCover"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone" />
+                <TextView
+                    android:id="@+id/detailCoverPlaceholder"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="YH"
+                    android:textColor="@color/yh_text"
+                    android:textSize="30sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
 
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-            <Button android:id="@+id/btnLaunch" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:text="启动" android:textAllCaps="false" />
-            <Button android:id="@+id/btnStatus" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="标记" android:textAllCaps="false" />
-            <Button android:id="@+id/btnKrSettings" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="引擎设置" android:textAllCaps="false" />
-            <Button android:id="@+id/btnEdit" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="编辑" android:textAllCaps="false" />
-            <Button android:id="@+id/btnDelete" android:layout_width="0dp" android:layout_weight="1" android:layout_height="42dp" android:layout_marginStart="8dp" android:text="删除" android:textAllCaps="false" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="14dp"
+                android:orientation="vertical">
+
+                <TextView android:id="@+id/detailTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Title"
+                    android:textColor="@color/yh_text"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <TextView android:id="@+id/detailOriginalTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text=""
+                    android:textColor="@color/yh_text_muted"
+                    android:textSize="12sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView android:id="@+id/detailInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="@color/yh_text_muted"
+                    android:textSize="12sp"
+                    android:lineSpacingExtra="3dp" />
+
+            </LinearLayout>
         </LinearLayout>
+
+        <!-- 元数据行：评分·时长 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <TextView android:id="@+id/detailRating"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="评分：-"
+                android:textColor="@color/yh_text_muted"
+                android:textSize="11sp" />
+
+            <TextView android:id="@+id/detailLength"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="时长：-"
+                android:textColor="@color/yh_text_muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 元数据行：开发商·日期 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal">
+
+            <TextView android:id="@+id/detailDeveloper"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="开发商：-"
+                android:textColor="@color/yh_text_muted"
+                android:textSize="11sp" />
+
+            <TextView android:id="@+id/detailDate"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="日期：-"
+                android:textColor="@color/yh_text_muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 简介 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="简介"
+                android:textColor="@color/yh_text"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView android:id="@+id/detailTranslateToggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="译文"
+                android:textColor="@color/yh_primary"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:gravity="center_vertical"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <TextView android:id="@+id/detailDescription"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="简介加载中…"
+            android:textColor="@color/yh_text_muted"
+            android:textSize="12sp"
+            android:lineSpacingExtra="3dp"
+            android:maxLines="4"
+            android:ellipsize="end" />
+
+        <TextView android:id="@+id/detailDescToggle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="展开全文"
+            android:textColor="@color/yh_primary"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <!-- 路径 -->
+        <TextView android:id="@+id/detailPath"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:maxLines="2"
+            android:ellipsize="middle"
+            android:text="路径：-"
+            android:textColor="@color/yh_text_muted"
+            android:textSize="11sp" />
+
+        <!-- 标签 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="标签"
+            android:textColor="@color/yh_text"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <LinearLayout android:id="@+id/detailTagContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="vertical">
+            <TextView android:id="@+id/detailTags"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="-"
+                android:textColor="@color/yh_primary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- 截图 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="媒体"
+            android:textColor="@color/yh_text"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="100dp"
+            android:layout_marginTop="4dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal">
+
+                <ImageView android:id="@+id/detailScreenshot1"
+                    android:layout_width="140dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginEnd="6dp"
+                    android:background="@drawable/bg_cover_placeholder"
+                    android:scaleType="centerCrop" />
+
+                <ImageView android:id="@+id/detailScreenshot2"
+                    android:layout_width="140dp"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/bg_cover_placeholder"
+                    android:scaleType="centerCrop" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- 操作按钮 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="horizontal">
+
+            <Button android:id="@+id/btnLaunch"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="32dp"
+                android:text="启动"
+                android:textAllCaps="false"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:textColor="@color/yh_text"
+                android:background="@drawable/bg_input" />
+
+            <Button android:id="@+id/btnStatus"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="32dp"
+                android:layout_marginStart="2dp"
+                android:text="标记"
+                android:textAllCaps="false"
+                android:textSize="8sp"
+                android:textColor="@color/yh_text"
+                android:background="@drawable/bg_input" />
+
+            <Button android:id="@+id/btnKrSettings"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="32dp"
+                android:layout_marginStart="2dp"
+                android:text="引擎"
+                android:textAllCaps="false"
+                android:textSize="8sp"
+                android:textColor="@color/yh_text"
+                android:background="@drawable/bg_input" />
+
+            <Button android:id="@+id/btnEdit"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="32dp"
+                android:layout_marginStart="2dp"
+                android:text="编辑"
+                android:textAllCaps="false"
+                android:textSize="8sp"
+                android:textColor="@color/yh_text"
+                android:background="@drawable/bg_input" />
+
+            <Button android:id="@+id/btnDelete"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="32dp"
+                android:layout_marginStart="2dp"
+                android:text="删除"
+                android:textAllCaps="false"
+                android:textSize="8sp"
+                android:textColor="@color/yh_text"
+                android:background="@drawable/bg_input" />
+        </LinearLayout>
+
     </LinearLayout>
-</LinearLayout>
+</ScrollView>

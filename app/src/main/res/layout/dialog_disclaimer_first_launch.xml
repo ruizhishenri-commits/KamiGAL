@@ -73,7 +73,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:text="• 本应用基于 YukiHub（GPL-3.0）二次开发，是遵循 GPL-3.0 协议的开源项目，仅用于管理和启动你有权使用的游戏/应用。\n• 你需要自行确认资源、账号、同步服务与第三方组件的合法性。\n• 本应用不提供游戏本体、破解资源或绕过授权的能力。\n• 第三方服务、系统权限和外部组件的可用性不由本应用保证。"
+                android:text="• 本应用仅用于管理和启动你有权使用的游戏/应用。\n• 你需要自行确认所添加资源以及第三方组件的合法性。\n• 本应用可提供游戏下载链接/信息来源为第三方，用户需自行确认资源的合法性与安全性。\n• VNDB、系统存储权限等能力均依赖第三方应用或系统环境，可能因设备、系统版本、权限状态或服务变更而不可用。\n\n感谢 xm486 的 YukiHub 项目为本应用的开发提供了启发。"
                 android:textColor="@color/yh_text_muted"
                 android:textSize="12sp"
                 android:lineSpacingExtra="3dp" />

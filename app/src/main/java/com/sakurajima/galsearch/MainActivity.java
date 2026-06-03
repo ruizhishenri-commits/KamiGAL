@@ -39,6 +39,7 @@ import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.DisplayCutout;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -52,6 +53,10 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.content.res.Configuration;
+import android.content.pm.ActivityInfo;
+import android.view.Gravity;
+import android.graphics.Typeface;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Spinner;
@@ -124,11 +129,19 @@ import java.util.Calendar;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import android.graphics.Point;
+import android.util.DisplayMetrics;
 
 public class MainActivity extends AppCompatActivity {
     @Override
     protected void attachBaseContext(Context newBase) {
-        super.attachBaseContext(UiScaleUtil.wrap(newBase));
+        Context context = UiScaleUtil.wrap(newBase);
+        // 提前设置Resources方向，确保setContentView加载正确的布局
+        boolean isPortrait = SakurajimaApp.isSavedPortrait();
+        Configuration config = new Configuration(context.getResources().getConfiguration());
+        config.orientation = isPortrait ? Configuration.ORIENTATION_PORTRAIT : Configuration.ORIENTATION_LANDSCAPE;
+        context = context.createConfigurationContext(config);
+        super.attachBaseContext(context);
     }
 
     private GameRepository repository;
@@ -168,6 +181,14 @@ private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
     private boolean isSearchDialogShowing = false;
     private ObjectAnimator scanAnimator;
     private ImageView ivScanLoading;
+    private LinearLayout portraitContainer;
+    private FrameLayout pageContent;
+    private LinearLayout bottomNav;
+    private View btnOrientation;
+    private TextView navLibrary, navSearchPage, navProfile, navSettingsPage;
+    private boolean isPortrait = false;
+    private String pendingSearchQuery = null;
+    private View[] portraitPages = new View[4];
     private SharedPreferences prefs;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
@@ -219,13 +240,33 @@ private Uri pendingBackgroundVideoUri;
 private ActivityResultLauncher<String> backupCreateLauncher;
 private ActivityResultLauncher<String[]> backupOpenLauncher;
 
+    private boolean mInitialized = false;
+
+    // 统计系统
+    private static final String STATS_BASE_URL = "https://kamistats-fz3vdv2a.manus.space";
+
+    private static final String KEY_DEVICE_ID = "stats_device_id";
+    private android.os.Handler statsHandler;
+    private Runnable heartbeatTask;
+    private android.os.Handler statsPollHandler;
+    private Runnable statsPollTask;
+    private TextView statsOvOnline;
+    private TextView statsOvToday;
+
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         enterImmersiveMode();
+
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        // 设置方向（与pref一致）
+        boolean savedPortrait = prefs.getBoolean("pref_portrait_mode", false);
+        isPortrait = savedPortrait;
+        setRequestedOrientation(savedPortrait ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+
         repository = new GameRepository(this);
         metadataRepository = new MetadataRepository(this);
-        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         if (!ensureDisclaimerAccepted()) {
             return;
         }
@@ -234,12 +275,24 @@ private ActivityResultLauncher<String[]> backupOpenLauncher;
         finishStalePlaySessionsIfAny();
         setupLaunchers();
         setupUi();
+        reportLaunch();
+        startHeartbeat();
         loadGames();
         if (ivScanLoading != null) ivScanLoading.setVisibility(View.GONE);
         if (prefs != null && prefs.getBoolean(KEY_AUTO_SCAN_ON_STARTUP, false)) {
             autoScanLastRootIfAvailable();
         }
         ensureStoragePermissionForInternalKrkr();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        enterImmersiveMode();
+        finishCurrentPlaySessionIfAny();
+        resumeBackgroundVideoIfNeeded();
+        updateProfilePanel();
+        maybeAutoWebDavSync();
     }
 
     private boolean ensureDisclaimerAccepted() {
@@ -339,6 +392,779 @@ applyImmersiveToWindow(window);
             }
             window.setAttributes(attrs);
         }
+    }
+
+    // ========== 横竖屏切换逻辑 ==========
+
+    private void toggleOrientation() {
+        isPortrait = !isPortrait;
+        updateLayoutForOrientation();
+        setRequestedOrientation(isPortrait ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        if (prefs != null) {
+            prefs.edit().putBoolean("pref_portrait_mode", isPortrait).apply();
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        isPortrait = newConfig.orientation == Configuration.ORIENTATION_PORTRAIT;
+        updateLayoutForOrientation();
+    }
+
+    private void updateLayoutForOrientation() {
+        View mainContent = findViewById(R.id.mainContentContainer);
+        if (portraitContainer == null || mainContent == null) return;
+        if (isPortrait) {
+            mainContent.setVisibility(View.GONE);
+            portraitContainer.setVisibility(View.VISIBLE);
+            enterImmersiveMode();
+            switchPortraitPage(0);
+        } else {
+            portraitContainer.setVisibility(View.GONE);
+            mainContent.setVisibility(View.VISIBLE);
+            enterImmersiveMode();
+        }
+    }
+
+    private void switchPortraitPage(int page) {
+        if (navLibrary == null) return;
+        navLibrary.setTextColor(page == 0 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+        navSearchPage.setTextColor(page == 1 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+        navProfile.setTextColor(page == 2 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+        navSettingsPage.setTextColor(page == 3 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+        pageContent.removeAllViews();
+
+        // 管理统计轮询：离开个人资料页时停止，进入时启动
+        if (page != 2) stopStatsPolling();
+
+        // 检查缓存
+        if (portraitPages[page] != null) {
+            pageContent.addView(portraitPages[page]);
+            if (page == 2) startStatsPolling();
+            return;
+        }
+        // 创建新页面并缓存
+        switch (page) {
+            case 0: showPortraitLibrary(); break;
+            case 1: showPortraitSearch(); break;
+            case 2: showPortraitProfile(); break;
+            case 3: showPortraitSettings(); break;
+        }
+        if (pageContent.getChildCount() > 0) {
+            portraitPages[page] = pageContent.getChildAt(0);
+        }
+        if (page == 2) startStatsPolling();
+    }
+
+    private void showPortraitLibrary() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(4), dp(4), dp(4), 0);
+
+        // 搜索框 + 操作按钮行
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        EditText searchInput = new EditText(this);
+        searchInput.setHint("搜索Galgame标题...");
+        searchInput.setText(query != null && !query.isEmpty() ? query : "");
+        searchInput.setTextColor(getColorCompat(R.color.yh_text));
+        searchInput.setHintTextColor(getColorCompat(R.color.yh_text_muted));
+        searchInput.setTextSize(12);
+        searchInput.setBackgroundResource(R.drawable.bg_input);
+        searchInput.setSingleLine(true);
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(0, dp(32), 1);
+        searchLp.setMargins(0, 0, dp(4), 0);
+        topRow.addView(searchInput, searchLp);
+
+        TextView btnAdd = new TextView(this);
+        btnAdd.setText("＋");
+        btnAdd.setGravity(Gravity.CENTER);
+        btnAdd.setTextSize(14);
+        btnAdd.setTextColor(getColorCompat(R.color.yh_text));
+        btnAdd.setBackgroundResource(R.drawable.bg_yuki_button);
+        btnAdd.setPadding(dp(8), 0, dp(8), 0);
+        topRow.addView(btnAdd, new LinearLayout.LayoutParams(dp(36), dp(32)));
+
+        TextView btnScan = new TextView(this);
+        btnScan.setText("⌕");
+        btnScan.setGravity(Gravity.CENTER);
+        btnScan.setTextSize(14);
+        btnScan.setTextColor(getColorCompat(R.color.yh_text));
+        btnScan.setBackgroundResource(R.drawable.bg_yuki_button);
+        btnScan.setPadding(dp(8), 0, dp(8), 0);
+        LinearLayout.LayoutParams scanLp = new LinearLayout.LayoutParams(dp(36), dp(32));
+        scanLp.setMargins(dp(4), 0, 0, 0);
+        topRow.addView(btnScan, scanLp);
+
+        root.addView(topRow);
+
+        // 筛选按钮行
+        LinearLayout filterRow = new LinearLayout(this);
+        filterRow.setOrientation(LinearLayout.HORIZONTAL);
+        filterRow.setPadding(dp(4), 0, dp(4), dp(4));
+
+        String[][] filters = {{"全部", "ALL"}, {"最近", "RECENT"}, {"在玩", "PLAYING"}, {"玩过", "COMPLETED"}, {"未玩", "UNPLAYED"}};
+        for (int i = 0; i < filters.length; i++) {
+            TextView btn = new TextView(this);
+            String val = filters[i][1];
+            btn.setText(filters[i][0]);
+            btn.setTextSize(11);
+            btn.setGravity(Gravity.CENTER);
+            btn.setPadding(dp(8), dp(4), dp(8), dp(4));
+            boolean selected = val.equals(filter);
+            btn.setTextColor(selected ? getColorCompat(R.color.yh_text) : getColorCompat(R.color.yh_text_muted));
+            btn.setAlpha(selected ? 1f : 0.72f);
+            btn.setBackgroundResource(R.drawable.bg_sidebar_item);
+            LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(28));
+            if (i > 0) flp.setMargins(dp(4), 0, 0, 0);
+            btn.setLayoutParams(flp);
+            final String fv = val;
+            btn.setOnClickListener(v -> {
+                filter = fv;
+                developerFilter = "";
+                // 更新所有按钮状态
+                for (int j = 0; j < filterRow.getChildCount(); j++) {
+                    View child = filterRow.getChildAt(j);
+                    String tag = (String) child.getTag();
+                    boolean sel = tag != null && tag.equals(filter);
+                    child.setSelected(sel);
+                    child.setAlpha(sel ? 1f : 0.72f);
+                    if (child instanceof TextView) {
+                        ((TextView) child).setTextColor(sel ? getColorCompat(R.color.yh_text) : getColorCompat(R.color.yh_text_muted));
+                    }
+                }
+                applyFilter();
+            });
+            btn.setTag(val);
+            filterRow.addView(btn);
+        }
+
+        root.addView(filterRow);
+
+        // 搜索框输入监听
+        searchInput.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                query = s == null ? "" : s.toString();
+                applyFilter();
+            }
+            @Override public void afterTextChanged(android.text.Editable s) {}
+        });
+
+        // 添加按钮
+        btnAdd.setOnClickListener(v -> showEditDialog(null));
+        // 扫描按钮
+        btnScan.setOnClickListener(v -> scanDirLauncher.launch(null));
+
+        // 游戏列表
+        RecyclerView portraitRecycler = new RecyclerView(this);
+        portraitRecycler.setLayoutManager(new GridLayoutManager(this, 3));
+        portraitRecycler.setHasFixedSize(true);
+        portraitRecycler.setItemViewCacheSize(20);
+        portraitRecycler.setAdapter(adapter);
+        portraitRecycler.setClipToPadding(false);
+        portraitRecycler.setPadding(dp(2), dp(2), dp(2), dp(2));
+        portraitRecycler.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        root.addView(portraitRecycler);
+
+        pageContent.addView(root, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showPortraitSearch() {
+        LinearLayout searchLayout = new LinearLayout(this);
+        searchLayout.setOrientation(LinearLayout.VERTICAL);
+        searchLayout.setPadding(dp(16), dp(16), dp(16), dp(16));
+
+        TextView title = new TextView(this);
+        title.setText("搜索 Galgame");
+        title.setTextColor(getColorCompat(R.color.yh_text));
+        title.setTextSize(20);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setPadding(0, 0, 0, dp(16));
+        searchLayout.addView(title);
+
+        LinearLayout inputRow = new LinearLayout(this);
+        inputRow.setOrientation(LinearLayout.HORIZONTAL);
+        EditText searchInput = new EditText(this);
+        searchInput.setHint("输入游戏标题...");
+        searchInput.setTextColor(getColorCompat(R.color.yh_text));
+        searchInput.setHintTextColor(getColorCompat(R.color.yh_text_muted));
+        searchInput.setTextSize(14);
+        searchInput.setBackgroundResource(R.drawable.bg_input);
+        searchInput.setPadding(dp(12), dp(8), dp(12), dp(8));
+        searchInput.setSingleLine(true);
+        searchInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        inputRow.addView(searchInput, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        Button searchBtn = new Button(this);
+        searchBtn.setText("搜索");
+        searchBtn.setTextColor(getColorCompat(R.color.yh_text));
+        searchBtn.setBackgroundResource(R.drawable.bg_yuki_button);
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(dp(72), dp(44));
+        btnLp.leftMargin = dp(8);
+        searchBtn.setLayoutParams(btnLp);
+        inputRow.addView(searchBtn);
+        searchLayout.addView(inputRow);
+
+        // 状态提示文字
+        TextView statusText = new TextView(this);
+        statusText.setVisibility(View.GONE);
+        statusText.setTextColor(getColorCompat(R.color.yh_text_muted));
+        statusText.setTextSize(12);
+        statusText.setPadding(dp(4), dp(10), dp(4), dp(4));
+        searchLayout.addView(statusText);
+
+        // 搜索结果容器
+        ScrollView resultScroll = new ScrollView(this);
+        resultScroll.setVisibility(View.GONE);
+        LinearLayout resultsContainer = new LinearLayout(this);
+        resultsContainer.setOrientation(LinearLayout.VERTICAL);
+        resultScroll.addView(resultsContainer, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+        searchLayout.addView(resultScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+
+        // 默认提示
+        TextView tip = new TextView(this);
+        tip.setText("搜索 VNDB 上的 Galgame 信息，支持日文/英文/中文标题");
+        tip.setTextColor(getColorCompat(R.color.yh_text_muted));
+        tip.setTextSize(11);
+        tip.setPadding(dp(4), dp(10), dp(4), dp(4));
+        searchLayout.addView(tip);
+
+        // 搜索逻辑
+        Runnable doSearch = () -> {
+            String q = searchInput.getText().toString().trim();
+            if (q.isEmpty()) {
+                Toast.makeText(this, "请输入搜索内容", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            tip.setVisibility(View.GONE);
+            statusText.setVisibility(View.VISIBLE);
+            statusText.setText("正在搜索...");
+            resultScroll.setVisibility(View.VISIBLE);
+            resultsContainer.removeAllViews();
+
+            SearchClient client = new SearchClient();
+            AppExecutors.runOnIo(() -> {
+                try {
+                    java.util.List<SearchClient.PlatformResult> results = client.searchGal(q, false);
+                    SearchClient.VndbInfo vndb = null;
+                    try { vndb = client.searchVndb(q); } catch (Exception ignored) {}
+
+                    final java.util.List<SearchClient.PlatformResult> finalResults = results;
+                    final SearchClient.VndbInfo finalVndb = vndb;
+                    runOnUiThread(() -> {
+                        String statusMsg = "找到 " + results.size() + " 个资源站";
+                        if (finalVndb != null) {
+                            statusMsg += "  📖 已匹配VNDB";
+                        } else {
+                            statusMsg += "  ⚠ VNDB未匹配";
+                        }
+                        statusText.setText(statusMsg);
+                        searchBtn.setEnabled(true);
+
+                        if (finalVndb != null) {
+                            // 封面图片 - 自适应比例
+                            FrameLayout coverFrame = new FrameLayout(MainActivity.this);
+                            coverFrame.setLayoutParams(new LinearLayout.LayoutParams(
+                                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                            coverFrame.setBackgroundResource(R.drawable.bg_cover_placeholder);
+                            ImageView coverImage = new ImageView(MainActivity.this);
+                            coverImage.setLayoutParams(new FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                            coverImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                            coverImage.setAdjustViewBounds(true);
+                            coverImage.setMaxHeight(dp(360));
+                            coverImage.setVisibility(View.GONE);
+                            coverFrame.addView(coverImage);
+                            resultsContainer.addView(coverFrame);
+
+                            // VNDB标题 + 评分
+                            TextView vndbTitle = new TextView(MainActivity.this);
+                            vndbTitle.setText("📖 " + finalVndb.title + (finalVndb.rating != null ? "  ⭐" + String.format("%.1f", finalVndb.rating) : ""));
+                            vndbTitle.setTextColor(getColorCompat(R.color.yh_text));
+                            vndbTitle.setTextSize(15);
+                            vndbTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+                            vndbTitle.setPadding(0, dp(8), 0, dp(2));
+                            resultsContainer.addView(vndbTitle);
+
+                            // 信息行：发售日 + 可点击的ID
+                            LinearLayout infoRow = new LinearLayout(MainActivity.this);
+                            infoRow.setOrientation(LinearLayout.HORIZONTAL);
+                            infoRow.setPadding(0, 0, 0, dp(4));
+                            if (finalVndb.released != null) {
+                                TextView releaseText = new TextView(MainActivity.this);
+                                releaseText.setText("📅 " + finalVndb.released);
+                                releaseText.setTextColor(getColorCompat(R.color.yh_text_muted));
+                                releaseText.setTextSize(11);
+                                infoRow.addView(releaseText);
+                            }
+                            if (finalVndb.id != null) {
+                                final String vndbUrl = "https://vndb.org/" + finalVndb.id;
+                                TextView idText = new TextView(MainActivity.this);
+                                idText.setText(" 🆔 " + finalVndb.id + " ↗");
+                                idText.setTextColor(getColorCompat(R.color.yh_primary));
+                                idText.setTextSize(11);
+                                idText.setPadding(dp(8), 0, 0, 0);
+                                idText.setClickable(true);
+                                idText.setOnClickListener(v -> {
+                                    try {
+                                        startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW,
+                                                android.net.Uri.parse(vndbUrl)));
+                                    } catch (Exception ignored) {}
+                                });
+                                infoRow.addView(idText);
+                            }
+                            resultsContainer.addView(infoRow);
+
+                            // 完整简介 + 翻译按钮
+                            if (finalVndb.description != null && !finalVndb.description.isEmpty()) {
+                                final String rawDesc = finalVndb.description.replaceAll("<[^>]+>", "").trim();
+                                final TextView descText = new TextView(MainActivity.this);
+                                descText.setText(rawDesc);
+                                descText.setTextColor(getColorCompat(R.color.yh_text_muted));
+                                descText.setTextSize(11);
+                                descText.setLineSpacing(dp(2), 1.0f);
+                                descText.setPadding(0, dp(4), 0, dp(4));
+                                resultsContainer.addView(descText);
+
+                                // 翻译按钮
+                                TextView translateBtn = new TextView(MainActivity.this);
+                                translateBtn.setText("🌐 翻译简介");
+                                translateBtn.setTextColor(getColorCompat(R.color.yh_primary));
+                                translateBtn.setTextSize(11);
+                                translateBtn.setTypeface(null, Typeface.BOLD);
+                                translateBtn.setPadding(dp(4), dp(4), dp(4), dp(8));
+                                translateBtn.setClickable(true);
+                                translateBtn.setOnClickListener(v -> {
+                                    if (translateBtn.getText().toString().contains("原文")) {
+                                        descText.setText(rawDesc);
+                                        translateBtn.setText("🌐 翻译简介");
+                                        return;
+                                    }
+                                    translateBtn.setEnabled(false);
+                                    translateBtn.setText("翻译中...");
+                                    AppExecutors.runOnIo(() -> {
+                                        try {
+                                            String translated = translateTextToChinese(rawDesc);
+                                            runOnUiThread(() -> {
+                                                if (translated != null && !translated.trim().isEmpty()) {
+                                                    descText.setText(translated.trim());
+                                                    translateBtn.setText("🌐 原文");
+                                                } else {
+                                                    Toast.makeText(MainActivity.this, "翻译失败", Toast.LENGTH_SHORT).show();
+                                                }
+                                                translateBtn.setEnabled(true);
+                                            });
+                                        } catch (Throwable t) {
+                                            runOnUiThread(() -> {
+                                                Toast.makeText(MainActivity.this, "翻译失败: " + t.getMessage(), Toast.LENGTH_SHORT).show();
+                                                translateBtn.setEnabled(true);
+                                            });
+                                        }
+                                    });
+                                });
+                                resultsContainer.addView(translateBtn);
+                            }
+
+                            View line = new View(MainActivity.this);
+                            line.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1));
+                            line.setBackgroundColor(0x33FFFFFF);
+                            resultsContainer.addView(line);
+
+                            // 后台加载封面 - 自适应比例
+                            if (finalVndb.imageUrl != null && !finalVndb.imageUrl.isEmpty()) {
+                                final String imgUrl = finalVndb.imageUrl;
+                                AppExecutors.runOnIo(() -> {
+                                    try {
+                                        java.net.URL url = new java.net.URL(imgUrl);
+                                        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                                        conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+                                        conn.setConnectTimeout(8000);
+                                        conn.setReadTimeout(8000);
+                                        conn.connect();
+                                        java.io.InputStream is = conn.getInputStream();
+                                        Bitmap bitmap = BitmapFactory.decodeStream(is);
+                                        is.close();
+                                        conn.disconnect();
+                                        if (bitmap != null) {
+                                            final int bmpW = bitmap.getWidth();
+                                            final int bmpH = bitmap.getHeight();
+                                            runOnUiThread(() -> {
+                                                coverImage.setImageBitmap(bitmap);
+                                                coverImage.setVisibility(View.VISIBLE);
+                                                coverFrame.setBackgroundColor(Color.TRANSPARENT);
+                                                // 根据图片比例动态调整封面高度
+                                                int screenW = getResources().getDisplayMetrics().widthPixels;
+                                                int calcedH = (int) (screenW * (double) bmpH / bmpW);
+                                                int maxH = dp(400);
+                                                if (calcedH > maxH) calcedH = maxH;
+                                                if (calcedH < dp(100)) calcedH = dp(100);
+                                                ViewGroup.LayoutParams ivLp = coverImage.getLayoutParams();
+                                                ivLp.height = calcedH;
+                                                coverImage.setLayoutParams(ivLp);
+                                            });
+                                        }
+                                    } catch (Exception ignored) {}
+                                });
+                            }
+                        }
+
+                        if (finalResults.isEmpty()) {
+                            TextView empty = new TextView(MainActivity.this);
+                            empty.setText("没有找到资源");
+                            empty.setTextColor(getColorCompat(R.color.yh_text_muted));
+                            empty.setTextSize(12);
+                            empty.setPadding(0, dp(8), 0, 0);
+                            resultsContainer.addView(empty);
+                            return;
+                        }
+
+                        java.util.Set<String> seenPlatforms = new java.util.HashSet<>();
+                        for (SearchClient.PlatformResult pr : finalResults) {
+                            if (!seenPlatforms.add(pr.platform)) continue;
+                            LinearLayout platRow = new LinearLayout(MainActivity.this);
+                            platRow.setOrientation(LinearLayout.HORIZONTAL);
+                            platRow.setPadding(0, dp(4), 0, dp(4));
+                            platRow.setBackgroundResource(R.drawable.bg_sidebar_item);
+                            platRow.setClickable(true);
+                            platRow.setFocusable(true);
+
+                            String tagStr = "";
+                            if (pr.tags != null) {
+                                if (pr.tags.contains("NoReq")) tagStr = "🟢";
+                                else if (pr.tags.contains("LoginPay")) tagStr = "🔒";
+                                else tagStr = "📄";
+                            }
+
+                            TextView platName = new TextView(MainActivity.this);
+                            platName.setText(tagStr + " " + pr.platform + " (" + pr.items.size() + ")");
+                            platName.setTextColor(getColorCompat(R.color.yh_primary));
+                            platName.setTextSize(12);
+                            platName.setPadding(dp(4), dp(4), dp(4), dp(4));
+                            platName.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+                            Button viewBtn = new Button(MainActivity.this);
+                            viewBtn.setText("查看");
+                            viewBtn.setTextSize(10);
+                            viewBtn.setBackgroundResource(R.drawable.bg_chip);
+                            viewBtn.setPadding(dp(8), dp(2), dp(8), dp(2));
+
+                            platRow.addView(platName);
+                            platRow.addView(viewBtn, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(28)));
+
+                            final java.util.List<SearchClient.Item> items = pr.items;
+                            final String platTitle = pr.platform;
+                            viewBtn.setOnClickListener(btn -> showOnlineResultItems(platTitle, items));
+
+                            resultsContainer.addView(platRow);
+                        }
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        statusText.setText("搜索失败: " + e.getMessage());
+                        searchBtn.setEnabled(true);
+                    });
+                }
+            });
+        };
+
+        searchInput.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+                    || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                doSearch.run();
+                return true;
+            }
+            return false;
+        });
+        searchBtn.setOnClickListener(v -> doSearch.run());
+
+        pageContent.addView(searchLayout, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showPortraitProfile() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setClipToPadding(false);
+        LinearLayout profileLayout = new LinearLayout(this);
+        profileLayout.setOrientation(LinearLayout.VERTICAL);
+        profileLayout.setGravity(Gravity.CENTER_HORIZONTAL);
+        profileLayout.setPadding(dp(24), dp(40), dp(24), dp(24));
+
+        // 头像
+        FrameLayout avatarFrame = new FrameLayout(this);
+        LinearLayout.LayoutParams avaLp = new LinearLayout.LayoutParams(dp(72), dp(72));
+        avaLp.gravity = Gravity.CENTER_HORIZONTAL;
+        avatarFrame.setLayoutParams(avaLp);
+        avatarFrame.setBackgroundResource(R.drawable.bg_cover_placeholder);
+        ImageView avatarView = new ImageView(this);
+        if (ivProfileAvatar != null && ivProfileAvatar.getDrawable() != null) {
+            avatarView.setImageDrawable(ivProfileAvatar.getDrawable());
+            avatarView.setVisibility(View.VISIBLE);
+        }
+        avatarView.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        avatarView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        avatarFrame.addView(avatarView);
+        TextView initialView = new TextView(this);
+        initialView.setText(tvProfileInitial != null ? tvProfileInitial.getText() : "?");
+        initialView.setTextColor(getColorCompat(R.color.yh_text));
+        initialView.setTextSize(24);
+        initialView.setTypeface(null, Typeface.BOLD);
+        initialView.setGravity(Gravity.CENTER);
+        avatarFrame.addView(initialView);
+        profileLayout.addView(avatarFrame);
+
+        // 昵称
+        TextView nameView = new TextView(this);
+        nameView.setText(tvProfileName != null ? tvProfileName.getText() : "未知");
+        nameView.setTextColor(getColorCompat(R.color.yh_text));
+        nameView.setTextSize(20);
+        nameView.setTypeface(null, Typeface.BOLD);
+        nameView.setGravity(Gravity.CENTER);
+        nameView.setPadding(0, dp(12), 0, dp(4));
+        profileLayout.addView(nameView);
+
+        // 统计卡片行
+        long total = totalPlayTime();
+        long today = todayTotalPlayTime();
+        LinearLayout statCards = new LinearLayout(this);
+        statCards.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams statRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        statRowLp.setMargins(0, dp(16), 0, 0);
+        statCards.setLayoutParams(statRowLp);
+        statCards.addView(profileStatCard("游戏", String.valueOf(allGames.size())), new LinearLayout.LayoutParams(0, dp(48), 1));
+        LinearLayout.LayoutParams statMid = new LinearLayout.LayoutParams(0, dp(48), 1);
+        statMid.setMargins(dp(6), 0, dp(6), 0);
+        statCards.addView(profileStatCard("总时长", TimeFormatUtil.playTime(total)), statMid);
+        statCards.addView(profileStatCard("今日", TimeFormatUtil.playTime(today)), new LinearLayout.LayoutParams(0, dp(48), 1));
+        profileLayout.addView(statCards);
+
+        // 在线数据（来自统计系统）
+        LinearLayout onlineRow = new LinearLayout(this);
+        onlineRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams onlineRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        onlineRowLp.setMargins(0, dp(6), 0, 0);
+        onlineRow.setLayoutParams(onlineRowLp);
+        final TextView ovOnline = profileStatCard("在线", "...");
+        final TextView ovToday = profileStatCard("今日使用", "...");
+        statsOvOnline = ovOnline;
+        statsOvToday = ovToday;
+        LinearLayout.LayoutParams ovMid = new LinearLayout.LayoutParams(0, dp(48), 1);
+        ovMid.setMargins(dp(6), 0, dp(6), 0);
+        onlineRow.addView(ovOnline, new LinearLayout.LayoutParams(0, dp(48), 1));
+        onlineRow.addView(ovToday, ovMid);
+        profileLayout.addView(onlineRow);
+        AppExecutors.runOnIo(() -> {
+            try {
+                URL statsUrl = new URL("https://kamistats-fz3vdv2a.manus.space/api/trpc/stats.overview");
+                HttpURLConnection conn = (HttpURLConnection) statsUrl.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line);
+                    br.close();
+                    org.json.JSONObject root = new org.json.JSONObject(sb.toString());
+                    org.json.JSONObject data = root.optJSONObject("result");
+                    if (data != null) data = data.optJSONObject("data");
+                    if (data != null) data = data.optJSONObject("json");
+                    final String onlineStr = String.valueOf(data != null ? data.optInt("onlineNow", 0) : 0);
+                    final String todayStr = String.valueOf(data != null ? data.optInt("todayLaunches", 0) : 0);
+                    runOnUiThread(() -> {
+                        ovOnline.setText("在线\n" + onlineStr);
+                        ovToday.setText("今日使用\n" + todayStr);
+                    });
+                }
+            } catch (Throwable ignored) {}
+        });
+
+        // 签名
+        final String signature = profileSignature();
+        if (signature != null && !signature.isEmpty()) {
+            TextView sigView = new TextView(this);
+            sigView.setText("✏ " + signature);
+            sigView.setTextColor(getColorCompat(R.color.yh_text_muted));
+            sigView.setTextSize(12);
+            sigView.setGravity(Gravity.CENTER);
+            sigView.setPadding(dp(8), dp(8), dp(8), dp(8));
+            LinearLayout.LayoutParams sigLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            sigLp.setMargins(0, dp(8), 0, 0);
+            sigView.setLayoutParams(sigLp);
+            profileLayout.addView(sigView);
+        }
+
+        // 今日动态
+        TextView activityTitle = new TextView(this);
+        activityTitle.setText("今日动态");
+        activityTitle.setTextColor(getColorCompat(R.color.yh_text));
+        activityTitle.setTextSize(14);
+        activityTitle.setTypeface(null, Typeface.BOLD);
+        LinearLayout.LayoutParams actTitleLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actTitleLp.setMargins(0, dp(16), 0, dp(4));
+        activityTitle.setLayoutParams(actTitleLp);
+        profileLayout.addView(activityTitle);
+        TextView activityText = new TextView(this);
+        activityText.setText(buildTodayActivityText());
+        activityText.setTextColor(getColorCompat(R.color.yh_text_muted));
+        activityText.setTextSize(12);
+        activityText.setLineSpacing(dp(1), 1.0f);
+        activityText.setBackgroundResource(R.drawable.bg_input);
+        activityText.setPadding(dp(10), dp(8), dp(10), dp(8));
+        profileLayout.addView(activityText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 最近动态
+        TextView recentTitle = new TextView(this);
+        recentTitle.setText("最近动态");
+        recentTitle.setTextColor(getColorCompat(R.color.yh_text));
+        recentTitle.setTextSize(14);
+        recentTitle.setTypeface(null, Typeface.BOLD);
+        LinearLayout.LayoutParams recTitleLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        recTitleLp.setMargins(0, dp(12), 0, dp(4));
+        recentTitle.setLayoutParams(recTitleLp);
+        profileLayout.addView(recentTitle);
+        LinearLayout feedList = new LinearLayout(this);
+        feedList.setOrientation(LinearLayout.VERTICAL);
+        buildRecentActivityViews(feedList);
+        profileLayout.addView(feedList, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 头像点击更换
+        avatarFrame.setClickable(true);
+        avatarFrame.setOnClickListener(v -> showProfileDialog());
+
+        // 编辑资料按钮
+        Button editBtn = new Button(this);
+        editBtn.setText("编辑个人资料");
+        editBtn.setTextColor(getColorCompat(R.color.yh_text));
+        editBtn.setBackgroundResource(R.drawable.bg_yuki_button);
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
+        btnLp.setMargins(0, dp(16), 0, 0);
+        editBtn.setLayoutParams(btnLp);
+        editBtn.setOnClickListener(v -> showProfileDialog());
+        profileLayout.addView(editBtn);
+
+        scroll.addView(profileLayout);
+        pageContent.addView(scroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showPortraitSettings() {
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout settingsLayout = new LinearLayout(this);
+        settingsLayout.setOrientation(LinearLayout.VERTICAL);
+        settingsLayout.setPadding(dp(20), dp(20), dp(20), dp(20));
+
+        TextView title = new TextView(this);
+        title.setText("设置");
+        title.setTextColor(getColorCompat(R.color.yh_text));
+        title.setTextSize(20);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setPadding(0, 0, 0, dp(20));
+        settingsLayout.addView(title);
+
+        // 挖孔屏开关
+        LinearLayout cutoutRow = new LinearLayout(this);
+        cutoutRow.setOrientation(LinearLayout.HORIZONTAL);
+        cutoutRow.setGravity(Gravity.CENTER_VERTICAL);
+        cutoutRow.setPadding(dp(4), dp(8), dp(4), dp(8));
+        cutoutRow.setBackgroundResource(R.drawable.bg_input);
+        TextView cutoutLabel = new TextView(this);
+        cutoutLabel.setText("适配挖孔屏/全面屏");
+        cutoutLabel.setTextColor(getColorCompat(R.color.yh_text));
+        cutoutLabel.setTextSize(14);
+        cutoutRow.addView(cutoutLabel, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        CheckBox cutoutCheck = new CheckBox(this);
+        cutoutCheck.setChecked(prefs != null && prefs.getBoolean(KEY_CUTOUT_ENABLED, false));
+        cutoutCheck.setOnCheckedChangeListener((btn, checked) -> {
+            if (prefs != null) {
+                prefs.edit().putBoolean(KEY_CUTOUT_ENABLED, checked).apply();
+                enterImmersiveMode();
+            }
+        });
+        cutoutRow.addView(cutoutCheck);
+        settingsLayout.addView(cutoutRow);
+
+        // 字体大小
+        LinearLayout fontSizeRow = new LinearLayout(this);
+        fontSizeRow.setOrientation(LinearLayout.HORIZONTAL);
+        fontSizeRow.setGravity(Gravity.CENTER_VERTICAL);
+        fontSizeRow.setPadding(dp(4), dp(12), dp(4), dp(8));
+        fontSizeRow.setBackgroundResource(R.drawable.bg_input);
+        fontSizeRow.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView fontSizeLabel = new TextView(this);
+        fontSizeLabel.setText("整体字体大小");
+        fontSizeLabel.setTextColor(getColorCompat(R.color.yh_text));
+        fontSizeLabel.setTextSize(14);
+        fontSizeRow.addView(fontSizeLabel, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView fontSizeValue = new TextView(this);
+        fontSizeValue.setText("100%");
+        fontSizeValue.setTextColor(getColorCompat(R.color.yh_primary));
+        fontSizeValue.setTextSize(14);
+        fontSizeValue.setTypeface(null, Typeface.BOLD);
+        fontSizeRow.addView(fontSizeValue);
+        settingsLayout.addView(fontSizeRow);
+
+        // 更多设置按钮
+        Button moreBtn = new Button(this);
+        moreBtn.setText("打开更多设置 ⚙");
+        moreBtn.setTextColor(getColorCompat(R.color.yh_text));
+        moreBtn.setBackgroundResource(R.drawable.bg_yuki_button);
+        LinearLayout.LayoutParams moreLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
+        moreLp.setMargins(0, dp(16), 0, 0);
+        moreBtn.setLayoutParams(moreLp);
+        moreBtn.setOnClickListener(v -> showSettingsDialog());
+        settingsLayout.addView(moreBtn);
+
+        // 切换横屏按钮
+        Button switchOriBtn = new Button(this);
+        switchOriBtn.setText("切换到横屏模式 ⟲");
+        switchOriBtn.setTextColor(getColorCompat(R.color.yh_text));
+        switchOriBtn.setBackgroundResource(R.drawable.bg_yuki_button);
+        LinearLayout.LayoutParams switchOriLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
+        switchOriLp.setMargins(0, dp(12), 0, 0);
+        switchOriBtn.setLayoutParams(switchOriLp);
+        switchOriBtn.setOnClickListener(v -> toggleOrientation());
+        settingsLayout.addView(switchOriBtn);
+
+        // 关于按钮
+        Button aboutBtn = new Button(this);
+        aboutBtn.setText("关于 KamiGAL ℹ");
+        aboutBtn.setTextColor(getColorCompat(R.color.yh_text));
+        aboutBtn.setBackgroundResource(R.drawable.bg_yuki_button);
+        LinearLayout.LayoutParams aboutLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
+        aboutLp.setMargins(0, dp(12), 0, 0);
+        aboutBtn.setLayoutParams(aboutLp);
+        aboutBtn.setOnClickListener(v -> showAboutDialog());
+        settingsLayout.addView(aboutBtn);
+
+        scroll.addView(settingsLayout);
+        pageContent.addView(scroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     private void setupLaunchers() {
@@ -822,9 +1648,23 @@ if (sideTranslateToggle != null) sideTranslateToggle.setOnClickListener(v -> { c
         setupDeveloperToggle();
         adapter = new GameAdapter();
         adapter.setOnGameClickListener(new GameAdapter.OnGameClickListener() {
-            @Override public void onGameClick(Game game) { updateSideDetail(game); }
+            @Override public void onGameClick(Game game) {
+                if (isPortrait) {
+                    // 竖屏模式：单击弹出运行按钮
+                    showPortraitLaunchConfirm(game);
+                } else {
+                    updateSideDetail(game);
+                }
+            }
             @Override public void onGameDoubleClick(Game game) { if (game != null) launchGame(game); }
-            @Override public void onGameLongClick(Game game) { showEditDialog(game); }
+            @Override public void onGameLongClick(Game game) {
+                if (isPortrait) {
+                    // 竖屏长按：弹出菜单（查看详情/编辑/删除）
+                    showPortraitGameMenu(game);
+                } else {
+                    showEditDialog(game);
+                }
+            }
             @Override public void onStatusClick(Game game) { updateSideDetail(game); showPlayStatusDialog(game, null); }
         });
         recycler.setLayoutManager(new GridLayoutManager(this, 5));
@@ -834,10 +1674,15 @@ if (sideTranslateToggle != null) sideTranslateToggle.setOnClickListener(v -> { c
 View addButton = findViewById(R.id.btnAdd);
         View scanButton = findViewById(R.id.btnScan);
         ivScanLoading = findViewById(R.id.ivScanLoading);
- View settingsButton = findViewById(R.id.btnSettings);
-        applyTopActionFeedback(addButton);
-applyTopActionFeedback(scanButton);
-applyTopActionFeedback(settingsButton);
+  View settingsButton = findViewById(R.id.btnSettings);
+        btnOrientation = findViewById(R.id.btnOrientation);
+        applyTopActionFeedback(settingsButton);
+ applyTopActionFeedback(scanButton);
+ applyTopActionFeedback(settingsButton);
+ if (btnOrientation != null) {
+            applyTopActionFeedback(btnOrientation);
+            btnOrientation.setOnClickListener(v -> { clickFeedback(v); toggleOrientation(); });
+        }
 addButton.setOnClickListener(v -> { clickFeedback(v); showEditDialog(null); });
 scanButton.setOnClickListener(v -> { clickFeedback(v); scanLastRootOrChoose(); });
 scanButton.setOnLongClickListener(v -> { clickFeedback(v); scanDirLauncher.launch(null); return true; });
@@ -857,6 +1702,24 @@ bindFilter(R.id.filterPlaying, "PLAYING"); bindFilter(R.id.filterCompleted, "COM
             public void onTextChanged(CharSequence s, int st, int b, int c) { query = s.toString(); applyFilter(); }
             public void afterTextChanged(Editable e) {}
         });
+
+        // 初始化竖屏控件
+        portraitContainer = findViewById(R.id.portraitContainer);
+        pageContent = findViewById(R.id.pageContent);
+        bottomNav = findViewById(R.id.bottomNav);
+        navLibrary = findViewById(R.id.navLibrary);
+        navSearchPage = findViewById(R.id.navSearchPage);
+        navProfile = findViewById(R.id.navProfile);
+        navSettingsPage = findViewById(R.id.navSettingsPage);
+        if (navLibrary != null) navLibrary.setOnClickListener(v -> switchPortraitPage(0));
+        if (navSearchPage != null) navSearchPage.setOnClickListener(v -> switchPortraitPage(1));
+        if (navProfile != null) navProfile.setOnClickListener(v -> switchPortraitPage(2));
+        if (navSettingsPage != null) navSettingsPage.setOnClickListener(v -> switchPortraitPage(3));
+        // 默认横屏启动
+// 根据保存的方向偏好设置UI布局（系统方向已在onCreate中通过setRequestedOrientation设置）
+            boolean savedPortrait = prefs.getBoolean("pref_portrait_mode", false);
+            isPortrait = savedPortrait;
+            updateLayoutForOrientation();
     }
 
     private void applyTopActionFeedback(View view) {
@@ -902,9 +1765,11 @@ private void setScanLoading(boolean loading) {
     }
 }
 
-private void showProfileDialog() {
-    final String currentName = displayProfileName();
-    final String localName = profileName();
+        private void showProfileDialog() {
+        // ========== 横竖屏统一弹窗 ==========
+        final boolean portraitNow = isPortrait;
+        final String currentName = displayProfileName();
+        final String localName = profileName();
     final String currentSignature = profileSignature();
     long total = totalPlayTime();
 
@@ -962,6 +1827,20 @@ private void showProfileDialog() {
     statCards.addView(profileStatCard("今日", TimeFormatUtil.playTime(todayTotalPlayTime())), new LinearLayout.LayoutParams(0, dp(48), 1));
     root.addView(statCards);
 
+    // 在线数据行
+    LinearLayout onlineRow = new LinearLayout(this);
+    onlineRow.setOrientation(LinearLayout.HORIZONTAL);
+    onlineRow.setPadding(0, 0, 0, dp(4));
+    final TextView ovOnline = profileStatCard("在线", "...");
+    final TextView ovToday = profileStatCard("今日使用", "...");
+    statsOvOnline = ovOnline;
+    statsOvToday = ovToday;
+    LinearLayout.LayoutParams ovMid = new LinearLayout.LayoutParams(0, dp(48), 1);
+    ovMid.setMargins(dp(6), 0, dp(6), 0);
+    onlineRow.addView(ovOnline, new LinearLayout.LayoutParams(0, dp(48), 1));
+    onlineRow.addView(ovToday, ovMid);
+    root.addView(onlineRow);
+
     TextView nameLabel = profileLabel("昵称");
     root.addView(nameLabel);
     EditText nameInput = profileEdit(localName, "输入昵称");
@@ -1008,10 +1887,17 @@ private void showProfileDialog() {
             .setNeutralButton("更换头像", null)
             .setNegativeButton("关闭", null)
             .show();
+    startStatsPolling();
+    dialog.setOnDismissListener(d -> stopStatsPolling());
     styleAlertDialogDark(dialog);
-    if (dialog.getWindow() != null) {
-        dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.62f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
-    }
+        if (dialog.getWindow() != null) {
+            // 取当前实际屏幕方向来计算宽度，高度自适应内容避免底部空白
+            DisplayMetrics dm = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            boolean actuallyPortrait = dm.widthPixels < dm.heightPixels;
+            float wRatio = actuallyPortrait ? 0.82f : 0.62f;
+            dialog.getWindow().setLayout((int) (dm.widthPixels * wRatio), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
         String name = nameInput.getText() == null ? "" : nameInput.getText().toString().trim();
         String sign = signatureInput.getText() == null ? "" : signatureInput.getText().toString().trim();
@@ -1025,9 +1911,9 @@ private void showProfileDialog() {
         dialog.dismiss();
     });
     dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> profileAvatarLauncher.launch("image/*"));
-}
+    }
 
-private String profileName() {
+    private String profileName() {
     return prefs == null ? "かみ" : prefs.getString(KEY_PROFILE_NAME, "かみ");
 }
 
@@ -1064,7 +1950,7 @@ private void showAboutDialog() {
     root.addView(version);
 
     TextView thanks = new TextView(this);
-    String html = "\n致谢\n\n感谢 <a href=\"https://github.com/xm486\">xm486</a> 开源 YukiHub 项目，让本应用得以诞生。<br><br>KamiGAL 基于 <a href=\"https://github.com/xm486/YukiHub\">YukiHub</a> v0.1.2.5 二次开发，<br>遵循 GPL-3.0 开源协议。<br><br>基于 GPL-3.0 二次开发的开源项目：<br><a href=\"https://github.com/xm486/YukiHub\">YukiHub</a>（原项目，作者 xm486）<br><a href=\"https://github.com/ruizhishenri-commits/KamiGAL\">KamiGAL</a>（二次开发版）<br><br>有条件的话请支持正版游戏，谢谢~";
+    String html = "\nKamiGAL 是一款 Galgame 启动与管理工具，\n致力于提供简洁优雅的本地游戏管理体验。\n\n感谢 <a href=\"https://github.com/xm486\">xm486</a> 的 YukiHub 项目带来的启发。\n\n有条件的话请支持正版游戏，谢谢~";
     thanks.setText(Html.fromHtml(html));
     thanks.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
     thanks.setLinkTextColor(getColorCompat(R.color.yh_primary));
@@ -1106,6 +1992,11 @@ private void showFriendsChatPlaceholder() {
         searchInput.setBackgroundResource(R.drawable.bg_input);
         searchInput.setPadding(dp(10), dp(8), dp(10), dp(8));
         searchInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        if (pendingSearchQuery != null && !pendingSearchQuery.isEmpty()) {
+            searchInput.setText(pendingSearchQuery);
+            searchInput.setSelection(pendingSearchQuery.length());
+            pendingSearchQuery = null;
+        }
         root.addView(searchInput, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
         LinearLayout modeRow = new LinearLayout(this);
@@ -2429,9 +3320,18 @@ private String extractImageUrlFromHtml(String html, String baseUrl) {
     return null;
 }
 
-private int dp(int value) {
-    return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
-}
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    // 根据UI布局方向获取弹窗宽度基准，不依赖系统方向是否已生效
+    private int getDialogBaseWidth(boolean portrait) {
+        Point size = new Point();
+        getWindowManager().getDefaultDisplay().getRealSize(size);
+        int w = Math.max(size.x, size.y);
+        int h = Math.min(size.x, size.y);
+        return portrait ? h : w;
+    }
 
 private String safeCacheName(String input) {
     if (input == null) return "cache";
@@ -2864,7 +3764,11 @@ String rematchItem = "重新匹配" + sourceLabel;
         ref[0] = optionDialog;
         styleAlertDialogDark(optionDialog);
         if (optionDialog.getWindow() != null) {
-            optionDialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.48f), (int) (getResources().getDisplayMetrics().heightPixels * 0.78f));
+            DisplayMetrics dmOpt = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dmOpt);
+            boolean optPortrait = dmOpt.widthPixels < dmOpt.heightPixels;
+            float optRatio = optPortrait ? 0.72f : 0.48f;
+            optionDialog.getWindow().setLayout((int) (dmOpt.widthPixels * optRatio), (int) (dmOpt.heightPixels * 0.78f));
         }
     }
 
@@ -2891,11 +3795,15 @@ String rematchItem = "重新匹配" + sourceLabel;
     }
 
     private void showSettingsDialog() {
+        final boolean portraitNow = isPortrait;
+        final int rootPad = dp(16);
+        final int btnH = dp(40);
+        final float titleSz = 14;
+        final float infoSz = 11;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundResource(R.drawable.bg_dialog);
-        int pad = dp(16);
-        root.setPadding(pad, dp(12), pad, dp(8));
+        root.setPadding(rootPad, dp(12), rootPad, dp(8));
 
         TextView scanTitle = new TextView(this);
         scanTitle.setText("扫描目录");
@@ -3198,7 +4106,12 @@ String rematchItem = "重新匹配" + sourceLabel;
                 .show();
         styleAlertDialogDark(dialog);
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.58f), (int) (getResources().getDisplayMetrics().heightPixels * 0.78f));
+            // 取当前实际屏幕尺寸和方向，无论系统方向变化是否完成都能正确显示
+            DisplayMetrics dm = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            boolean actuallyPortrait = dm.widthPixels < dm.heightPixels;
+            float wRatio = actuallyPortrait ? 0.88f : 0.58f;
+            dialog.getWindow().setLayout((int) (dm.widthPixels * wRatio), (int) (dm.heightPixels * 0.78f));
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             int depth = Math.max(1, Math.min(MAX_STARTUP_SCAN_DEPTH, scanDepthSeek.getProgress() + 1));
@@ -3258,32 +4171,36 @@ String rematchItem = "重新匹配" + sourceLabel;
     }
 
     private void showDisclaimerDialog() {
-        String text = "免责声明\n\n" +
-                "1. 本应用基于 YukiHub 二次开发，仅用于管理、整理和启动用户本人有权使用的游戏与应用。\n\n" +
-                "2. 用户应自行确保所添加资源、账号、同步内容以及第三方服务的合法性、完整性与可用性。\n\n" +
-                "3. 本应用不提供任何游戏本体、破解资源、绕过授权或规避版权/平台规则的能力。\n\n" +
-                "4. Shizuku、GameHub、WebDAV、VNDB、Bangumi、系统存储权限等能力均依赖第三方应用、系统环境或外部服务，可能因设备、系统版本、权限状态或服务变更而不可用。\n\n" +
-                "5. 因第三方服务、系统限制、用户误操作或资源本身问题造成的数据丢失、同步异常、启动失败、兼容性问题或其他损失，开发者不承担额外责任。\n\n" +
-                "6. 如果你不同意以上说明，请停止使用相关功能。";
-        TextView tv = new TextView(this);
-        int pad = dp(18);
-        tv.setPadding(pad, pad, pad, pad);
-        tv.setTextColor(getColorCompat(R.color.yh_text_muted));
-        tv.setTextSize(13);
-        tv.setLineSpacing(dp(3), 1.08f);
-        tv.setText(text);
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(tv);
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("免责声明")
-                .setView(scroll)
-                .setPositiveButton("知道了", null)
-                .show();
-        styleAlertDialogDark(dialog);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.62f), (int) (getResources().getDisplayMetrics().heightPixels * 0.72f));
-        }
+    String text = "免责声明\n\n" +
+    "1. 本应用仅用于管理、整理和启动用户本人有权使用的游戏与应用。\n\n" +
+    "2. 用户应自行确保所添加资源以及第三方服务的合法性、完整性与可用性。\n\n" +
+    "3. 本应用可提供游戏下载链接/信息来源为第三方，用户需自行确认资源的合法性与安全性。\n\n" +
+    "4. VNDB、系统存储权限等能力均依赖第三方应用或系统环境，可能因设备、系统版本、权限状态或服务变更而不可用。\n\n" +
+    "5. 因第三方服务、系统限制、用户误操作或资源本身问题造成的数据丢失、同步异常、启动失败、兼容性问题或其他损失，开发者不承担额外责任。\n\n" +
+    "6. 如果你不同意以上说明，请停止使用相关功能。";
+    TextView tv = new TextView(this);
+    int pad = dp(18);
+    tv.setPadding(pad, pad, pad, pad);
+    tv.setTextColor(getColorCompat(R.color.yh_text_muted));
+    tv.setTextSize(13);
+    tv.setLineSpacing(dp(3), 1.08f);
+    tv.setText(text);
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(tv);
+    AlertDialog dialog = new AlertDialog.Builder(this)
+    .setTitle("免责声明")
+    .setView(scroll)
+    .setPositiveButton("知道了", null)
+    .show();
+    styleAlertDialogDark(dialog);
+    if (dialog.getWindow() != null) {
+        DisplayMetrics dm = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+        boolean realPortrait = dm.widthPixels < dm.heightPixels;
+        float wRatio = realPortrait ? 0.70f : 0.48f;
+        dialog.getWindow().setLayout((int) (dm.widthPixels * wRatio), (int) (dm.heightPixels * 0.72f));
     }
+}
 
     private String normalizePlayStatus(String status) {
     if (status == null) return "unplayed";
@@ -3352,11 +4269,147 @@ private void showPlayStatusDialog(Game game, Dialog parentDialog) {
     ref[0] = dialog;
     styleAlertDialogDark(dialog);
     if (dialog.getWindow() != null) {
-        dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.42f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+            DisplayMetrics dm = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            boolean realPortrait = dm.widthPixels < dm.heightPixels;
+            float wRatio = realPortrait ? 0.70f : 0.42f;
+            dialog.getWindow().setLayout((int) (dm.widthPixels * wRatio), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
     }
 }
 
-private void showDetailDialog(Game game) {
+    // 竖屏单击启动确认弹窗
+    private void showPortraitLaunchConfirm(Game game) {
+        if (game == null) return;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundResource(R.drawable.bg_dialog);
+        int pad = dp(18);
+        root.setPadding(pad, dp(12), pad, dp(12));
+
+        // 游戏标题
+        TextView titleView = new TextView(this);
+        titleView.setText(emptyText(game.title, "未命名游戏"));
+        titleView.setTextColor(getColorCompat(R.color.yh_text));
+        titleView.setTextSize(18);
+        titleView.setTypeface(null, android.graphics.Typeface.BOLD);
+        titleView.setGravity(Gravity.CENTER);
+        titleView.setPadding(0, 0, 0, dp(8));
+        root.addView(titleView);
+
+        // 启动按钮
+        Button launchBtn = new Button(this);
+        launchBtn.setText("▶ 启动");
+        launchBtn.setTextSize(16);
+        launchBtn.setTextColor(getColorCompat(R.color.yh_text));
+        launchBtn.setBackgroundResource(R.drawable.bg_yuki_button);
+        launchBtn.setPadding(0, dp(10), 0, dp(10));
+        launchBtn.setAllCaps(false);
+        root.addView(launchBtn, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+
+        // 取消按钮
+        Button cancelBtn = new Button(this);
+        cancelBtn.setText("取消");
+        cancelBtn.setTextSize(14);
+        cancelBtn.setTextColor(getColorCompat(R.color.yh_text_muted));
+        cancelBtn.setBackgroundResource(R.drawable.bg_input);
+        cancelBtn.setPadding(0, dp(8), 0, dp(8));
+        cancelBtn.setAllCaps(false);
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+        cancelLp.setMargins(0, dp(8), 0, 0);
+        root.addView(cancelBtn, cancelLp);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(root)
+                .show();
+        styleAlertDialogDark(dialog);
+        if (dialog.getWindow() != null) {
+            DisplayMetrics dm = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            boolean realPortrait = dm.widthPixels < dm.heightPixels;
+            float wRatio = realPortrait ? 0.62f : 0.38f;
+            dialog.getWindow().setLayout((int) (dm.widthPixels * wRatio), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+        launchBtn.setOnClickListener(v -> { dialog.dismiss(); launchGame(game); });
+        cancelBtn.setOnClickListener(v -> dialog.dismiss());
+    }
+
+
+    private void showPortraitGameMenu(Game game) {
+        if (game == null) return;
+        String sourceLabel = metadataSourceLabel();
+        String rematchItem = "重新匹配" + sourceLabel;
+        String customSearchItem = false ? "自定义搜索Bangumi" : "自定义搜索VNDB";
+        String syncItem = "同步" + sourceLabel + "到卡片";
+        String playTimeItem = "修改游玩时长";
+        String favoriteItem = game.favorite ? "取消收藏" : "收藏游戏";
+        String shareItem = "分享游戏";
+        String[] items = (game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS)
+                ? new String[]{"编辑游戏", "设置游玩状态", shareItem, playTimeItem, favoriteItem, rematchItem, customSearchItem, syncItem, "引擎设置", "详细信息", "删除游戏"}
+                : new String[]{"编辑游戏", "设置游玩状态", shareItem, playTimeItem, favoriteItem, rematchItem, customSearchItem, syncItem, "详细信息", "删除游戏"};
+        LinearLayout listRoot = new LinearLayout(this);
+        listRoot.setOrientation(LinearLayout.VERTICAL);
+        listRoot.setBackgroundResource(R.drawable.bg_dialog);
+        int hp = dp(18);
+        listRoot.setPadding(0, dp(6), 0, dp(6));
+        final AlertDialog[] ref = new AlertDialog[1];
+        for (String item : items) {
+            TextView row = new TextView(this);
+            row.setText(item);
+            row.setTextColor(getColorCompat("删除游戏".equals(item) ? R.color.yh_secondary : R.color.yh_text));
+            row.setTextSize(15);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            row.setPadding(hp, 0, hp, 0);
+            row.setBackgroundResource(R.drawable.bg_input);
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
+            rlp.setMargins(dp(10), dp(4), dp(10), dp(4));
+            listRoot.addView(row, rlp);
+            row.setOnClickListener(v -> {
+                if (ref[0] != null) ref[0].dismiss();
+                String chosen = ((TextView) v).getText().toString();
+                if ("编辑游戏".equals(chosen)) showEditDialog(game);
+                else if ("设置游玩状态".equals(chosen)) showPlayStatusDialog(game, null);
+                else if (playTimeItem.equals(chosen)) showEditPlayTimeDialog(game);
+                else if (favoriteItem.equals(chosen)) {
+                    game.favorite = !game.favorite;
+                    repository.update(game);
+                    loadGames();
+                    Toast.makeText(this, game.favorite ? "已收藏" : "已取消收藏", Toast.LENGTH_SHORT).show();
+                }
+                else if (shareItem.equals(chosen)) shareGame(game);
+                else if (rematchItem.equals(chosen)) {
+                    selectedGame = game;
+                    if (metadataRepository != null) {
+                        metadataRepository.clearVndb(game.id);
+                    }
+                    fetchSelectedMetadata(game, true);
+                }
+                else if (customSearchItem.equals(chosen)) { selectedGame = game; showCustomVndbSearchDialog(game); }
+                else if (syncItem.equals(chosen)) { selectedGame = game; syncVndbToGameCard(game); }
+                else if ("引擎设置".equals(chosen)) { if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else showKrSettingsDialog(game); }
+                else if ("详细信息".equals(chosen)) showDetailDialog(game);
+                else if ("删除游戏".equals(chosen)) confirmDeleteGame(game);
+            });
+        }
+        ScrollView optionScroll = new ScrollView(this);
+        optionScroll.setFillViewport(false);
+        optionScroll.setBackgroundResource(R.drawable.bg_dialog);
+        optionScroll.addView(listRoot, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+        AlertDialog optionDialog = new AlertDialog.Builder(this)
+                .setTitle(emptyText(game.title, "游戏选项"))
+                .setView(optionScroll)
+                .show();
+        ref[0] = optionDialog;
+        styleAlertDialogDark(optionDialog);
+        if (optionDialog.getWindow() != null) {
+            DisplayMetrics dmOpt = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dmOpt);
+            boolean optPortrait = dmOpt.widthPixels < dmOpt.heightPixels;
+            float optRatio = optPortrait ? 0.72f : 0.48f;
+            optionDialog.getWindow().setLayout((int) (dmOpt.widthPixels * optRatio), (int) (dmOpt.heightPixels * 0.78f));
+        }
+    }
+
+    private void showDetailDialog(Game game) {
         Dialog d = new Dialog(this);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         d.getWindow();
@@ -3368,13 +4421,26 @@ private void showDetailDialog(Game game) {
         d.setContentView(R.layout.dialog_game_detail);
         if (d.getWindow() != null) {
             d.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.82f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.88f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
             d.getWindow().setFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
             applyImmersiveToWindow(d.getWindow());
         }
-        ((TextView)d.findViewById(R.id.detailTitle)).setText(game.title);
-        ((TextView)d.findViewById(R.id.detailInfo)).setText("状态：" + playStatusLabel(game.playStatus) + "\n引擎：" + game.engine.getDisplayName() + "\n总时长：" + TimeFormatUtil.playTime(game.totalPlayTime) + "\n最近游玩：" + TimeFormatUtil.date(game.lastPlayedAt) + "\n模拟器：" + emptyText(game.emulatorPackage, "未配置"));
+
+        // 填充基本信息
+        ((TextView)d.findViewById(R.id.detailTitle)).setText(emptyText(game.title, "未命名"));
+        ((TextView)d.findViewById(R.id.detailOriginalTitle)).setText("");
+        ((TextView)d.findViewById(R.id.detailInfo)).setText("状态：" + playStatusLabel(game.playStatus)
+                + " · " + game.engine.getDisplayName()
+                + " · " + TimeFormatUtil.playTime(game.totalPlayTime)
+                + "\n最近：" + TimeFormatUtil.date(game.lastPlayedAt)
+                + "\n模拟器：" + getAppLabel(game.emulatorPackage));
         ((TextView)d.findViewById(R.id.detailPath)).setText("路径：" + displayPath(game.rootUri));
+        ((TextView)d.findViewById(R.id.detailRating)).setText("评分：-");
+        ((TextView)d.findViewById(R.id.detailDeveloper)).setText("开发商：-");
+        ((TextView)d.findViewById(R.id.detailDate)).setText("日期：-");
+        ((TextView)d.findViewById(R.id.detailLength)).setText("时长：-");
+
+        // 封面
         ImageView cover = d.findViewById(R.id.detailCover);
         TextView ph = d.findViewById(R.id.detailCoverPlaceholder);
         String safeCover = safeCoverUri(game);
@@ -3388,8 +4454,34 @@ private void showDetailDialog(Game game) {
                 cover.setImageDrawable(null);
                 cover.setVisibility(View.GONE);
                 ph.setVisibility(View.VISIBLE);
+                ph.setText(initials(game.title));
             }
+        } else {
+            ph.setText(initials(game.title));
         }
+
+        // 从数据库加载VNDB元数据
+        VnMetadata meta = metadataRepository != null ? metadataRepository.getVndb(game.id) : null;
+        if (meta != null) {
+            fillDetailWithMetadata(d, meta, game);
+        } else {
+            // 没有缓存，异步获取
+            fetchDetailMetadata(game, d);
+        }
+
+        // 简介展开
+        TextView descView = d.findViewById(R.id.detailDescription);
+        TextView descToggle = d.findViewById(R.id.detailDescToggle);
+        descToggle.setOnClickListener(v -> {
+            boolean expanded = descView.getMaxLines() == Integer.MAX_VALUE;
+            descView.setMaxLines(expanded ? 4 : Integer.MAX_VALUE);
+            descToggle.setText(expanded ? "展开全文" : "收起");
+        });
+
+        // 译文切换（需在fillDetailWithMetadata中设置可见性和监听）
+        // 先在fillDetailWithMetadata中处理
+
+        // 按钮事件
         d.findViewById(R.id.btnStatus).setOnClickListener(v -> showPlayStatusDialog(game, d));
         d.findViewById(R.id.btnEdit).setOnClickListener(v -> { d.dismiss(); showEditDialog(game); });
         boolean hasEngineSettings = game.engine == EngineType.KIRIKIRI || game.engine == EngineType.ONS;
@@ -3397,17 +4489,120 @@ private void showDetailDialog(Game game) {
         d.findViewById(R.id.btnKrSettings).setOnClickListener(v -> {
             if (game.engine == EngineType.ONS) showOnsSettingsDialog(game); else showKrSettingsDialog(game);
         });
-        d.findViewById(R.id.btnDelete).setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("删除游戏").setMessage("确定删除 “" + game.title + "”？不会删除本体文件。").setPositiveButton("删除", (x,w)->{ repository.delete(game.id); d.dismiss(); loadGames(); }).setNegativeButton("取消", null).show());
-        d.findViewById(R.id.btnLaunch).setOnClickListener(v -> launchGame(game));
+        d.findViewById(R.id.btnDelete).setOnClickListener(v ->
+            new AlertDialog.Builder(this)
+                .setTitle("删除游戏")
+                .setMessage("确定删除 “" + game.title + "”？不会删除本体文件。")
+                .setPositiveButton("删除", (x,w)->{ repository.delete(game.id); d.dismiss(); loadGames(); })
+                .setNegativeButton("取消", null)
+                .show());
+        Button launchBtn = d.findViewById(R.id.btnLaunch);
+        android.text.SpannableString ss = new android.text.SpannableString("▶启动");
+        ss.setSpan(new android.text.style.RelativeSizeSpan(0.4f), 0, 1, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        launchBtn.setText(ss);
+        launchBtn.setOnClickListener(v -> launchGame(game));
+
         d.show();
         applyImmersiveToWindow(d.getWindow());
         enterImmersiveMode();
         if (d.getWindow() != null) {
-            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.82f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.88f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
             applyImmersiveToWindow(d.getWindow());
             d.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
             applyImmersiveToWindow(d.getWindow());
         }
+    }
+
+    // 用缓存的元数据填充详情弹窗
+    private void fillDetailWithMetadata(Dialog d, VnMetadata meta, Game game) {
+        ((TextView)d.findViewById(R.id.detailOriginalTitle)).setText(
+            emptyText(meta.originalTitle, emptyText(meta.romanTitle, "")));
+        ((TextView)d.findViewById(R.id.detailRating)).setText(emptyText(meta.ratingText, "评分：-/10"));
+        ((TextView)d.findViewById(R.id.detailDeveloper)).setText("开发商：" +
+            emptyText(meta.developer, "-"));
+        ((TextView)d.findViewById(R.id.detailDate)).setText("日期：" +
+            emptyText(meta.released, "-"));
+        ((TextView)d.findViewById(R.id.detailLength)).setText("时长：" +
+            (meta.lengthMinutes > 0 ? TimeFormatUtil.playTime(meta.lengthMinutes * 60000L) : "-"));
+
+        // 简介
+        String desc = game != null && game.description != null && !game.description.isEmpty()
+            ? game.description : (meta.description != null ? meta.description : "暂无简介");
+        TextView descView = d.findViewById(R.id.detailDescription);
+        descView.setText(desc);
+        TextView descToggle = d.findViewById(R.id.detailDescToggle);
+        descToggle.setVisibility(desc.length() > 150 ? View.VISIBLE : View.GONE);
+
+        // 标签
+        String tags = meta.tagsText;
+        if (tags != null && !tags.isEmpty()) {
+            ((TextView)d.findViewById(R.id.detailTags)).setText(tags);
+        }
+
+        // 截图
+        if (meta.screenshotUrls != null && meta.screenshotUrls.size() > 0) {
+            loadRemoteImage(meta.screenshotUrls.get(0),
+                (ImageView)d.findViewById(R.id.detailScreenshot1), "dshot1_" + meta.id);
+        }
+        if (meta.screenshotUrls != null && meta.screenshotUrls.size() > 1) {
+            loadRemoteImage(meta.screenshotUrls.get(1),
+                (ImageView)d.findViewById(R.id.detailScreenshot2), "dshot2_" + meta.id);
+        }
+
+        // 译文切换
+        TextView translateToggle = d.findViewById(R.id.detailTranslateToggle);
+        boolean hasTranslation = meta.translatedDescription != null && !meta.translatedDescription.isEmpty();
+        if (hasTranslation) {
+            translateToggle.setVisibility(View.VISIBLE);
+            final boolean[] showingTranslation = {false};
+            translateToggle.setOnClickListener(v -> {
+                showingTranslation[0] = !showingTranslation[0];
+                translateToggle.setText(showingTranslation[0] ? "原文" : "译文");
+                descView.setText(showingTranslation[0] ? meta.translatedDescription : desc);
+                // 如果切换，重置展开状态
+                descView.setMaxLines(4);
+                descToggle.setText(descView.length() > 150 ? "展开全文" : "");
+                descToggle.setVisibility(descView.length() > 150 ? View.VISIBLE : View.GONE);
+            });
+        }
+    }
+
+    // 异步获取VNDB元数据并填充详情
+    private void fetchDetailMetadata(Game game, Dialog d) {
+        if (metadataRepository == null) return;
+        AppExecutors.runOnSingle(() -> {
+            try {
+                VnMetadata meta = metadataRepository.getVndb(game.id);
+                final VnMetadata result = meta;
+                runOnUiThread(() -> {
+                    if (result != null) {
+                        fillDetailWithMetadata(d, result, game);
+                    } else {
+                        // 没有元数据，显示本地描述
+                        if (game.description != null && !game.description.isEmpty()) {
+                            ((TextView)d.findViewById(R.id.detailDescription)).setText(game.description);
+                        }
+                    }
+                });
+            } catch (Throwable ignored) {}
+        });
+    }
+
+    // 渲染详情弹窗的标签
+    private void renderDetailTagChips(Dialog d, List<String> tags) {
+        LinearLayout container = d.findViewById(R.id.detailTagContainer);
+        TextView tagsView = d.findViewById(R.id.detailTags);
+        if (tags == null || tags.isEmpty()) {
+            tagsView.setText("-");
+            return;
+        }
+        // 简化显示：用逗号分隔
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < Math.min(tags.size(), 20); i++) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append(tags.get(i));
+        }
+        tagsView.setText(sb.toString());
     }
 
     private void showGameHubShortcutPicker(EditText titleTarget, EditText pkgTarget, EditText gamehubIdTarget) {
@@ -3957,6 +5152,27 @@ private String displayPath(String value) {
         return s;
     }
 
+    // 从包名获取应用显示名称
+    private String getAppLabel(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()) return "未配置";
+        String pkg = packageName.trim().toLowerCase(Locale.ROOT);
+        // 处理内部包名
+        if (pkg.startsWith("internal.krkr")) return "内置 KRKR";
+        if (pkg.startsWith("internal.ons")) return "内置 ONS";
+        if (pkg.startsWith("internal.tyrano")) return "内置 Tyrano";
+        if (pkg.startsWith("internal.artemis.compat.v2")) return "内置 Artemis 兼容 V2";
+        if (pkg.startsWith("internal.artemis.compat")) return "内置 Artemis 兼容";
+        if (pkg.startsWith("internal.artemis")) return "内置 Artemis";
+        if (pkg.startsWith("com.sakurajima.galsearch")) return "内置引擎";
+        try {
+            android.content.pm.ApplicationInfo ai = getPackageManager().getApplicationInfo(pkg, 0);
+            CharSequence label = getPackageManager().getApplicationLabel(ai);
+            return label != null ? label.toString() : pkg;
+        } catch (Throwable e) {
+            return pkg;
+        }
+    }
+
     private String documentUriToPath(String value) {
         try {
             Uri uri = Uri.parse(value);
@@ -4008,10 +5224,15 @@ private String displayPath(String value) {
         pendingCoverUri = game == null ? null : game.coverUri;
         Dialog d = new Dialog(this); pendingEditDialog = d;
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        d.setContentView(R.layout.dialog_game_edit);
+        d.setContentView(isPortrait ? R.layout.dialog_game_edit_portrait : R.layout.dialog_game_edit);
         if (d.getWindow() != null) {
             d.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.82f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+            // 使用实际屏幕方向计算宽度，避免异步方向未生效时尺寸不准
+            DisplayMetrics dmEdit = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dmEdit);
+            boolean actuallyPortrait = dmEdit.widthPixels < dmEdit.heightPixels;
+            float wRatio = actuallyPortrait ? 0.95f : 0.82f;
+            d.getWindow().setLayout((int) (dmEdit.widthPixels * wRatio), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
         ((TextView)d.findViewById(R.id.editDialogTitle)).setText(game == null ? "添加游戏" : "编辑游戏");
         EditText title = d.findViewById(R.id.etGameTitle), pkg = d.findViewById(R.id.etEmulatorPackage), desc = d.findViewById(R.id.etDescription);
@@ -4154,7 +5375,11 @@ private String displayPath(String value) {
         d.setOnDismissListener(x -> pendingEditDialog = null);
         d.show();
         if (d.getWindow() != null) {
-            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.82f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+            DisplayMetrics dmAfter = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dmAfter);
+            boolean portAfter = dmAfter.widthPixels < dmAfter.heightPixels;
+            float r = portAfter ? 0.95f : 0.82f;
+            d.getWindow().setLayout((int) (dmAfter.widthPixels * r), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
     }
 
@@ -4332,7 +5557,11 @@ private void confirmClearPlayTime(Game game, Dialog editDialog) {
                 .show();
         styleAlertDialogDark(dialog);
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.52f), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
+            DisplayMetrics dm = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            boolean realPortrait = dm.widthPixels < dm.heightPixels;
+            float wRatio = realPortrait ? 0.52f : 0.42f;
+            dialog.getWindow().setLayout((int) (dm.widthPixels * wRatio), android.view.WindowManager.LayoutParams.WRAP_CONTENT);
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             Long totalMinutes = parseDurationToMinutes(totalInput.getText() == null ? "" : totalInput.getText().toString().trim());
@@ -4526,7 +5755,11 @@ private void confirmClearPlayTime(Game game, Dialog editDialog) {
         Window shownWindow = dialog.getWindow();
         if (shownWindow != null) {
             shownWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            shownWindow.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.72f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
+            DisplayMetrics dm = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            boolean realPortrait = dm.widthPixels < dm.heightPixels;
+            float wRatio = realPortrait ? 0.72f : 0.48f;
+            shownWindow.setLayout((int) (dm.widthPixels * wRatio), (int) (dm.heightPixels * 0.82f));
         }
     }
 
@@ -4610,7 +5843,11 @@ private void confirmClearPlayTime(Game game, Dialog editDialog) {
         Window shownWindow = dialog.getWindow();
         if (shownWindow != null) {
             shownWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            shownWindow.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.72f), (int) (getResources().getDisplayMetrics().heightPixels * 0.82f));
+            DisplayMetrics dm = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            boolean realPortrait = dm.widthPixels < dm.heightPixels;
+            float wRatio = realPortrait ? 0.72f : 0.48f;
+            shownWindow.setLayout((int) (dm.widthPixels * wRatio), (int) (dm.heightPixels * 0.82f));
         }
     }
 
@@ -5744,27 +6981,155 @@ return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.r
         styleAlertDialogDark(dialog);
     }
 
-    @Override protected void onResume() {
-    super.onResume();
-    enterImmersiveMode();
-    finishCurrentPlaySessionIfAny();
-    resumeBackgroundVideoIfNeeded();
-    
-    updateProfilePanel();
-    maybeAutoWebDavSync();
-}
-
 @Override protected void onPause() {
     pauseBackgroundVideoIfNeeded();
     super.onPause();
 }
 
-@Override protected void onDestroy() {
-    releaseBackgroundMediaPlayer();
-    super.onDestroy();
-}
+    @Override protected void onDestroy() {
+        stopHeartbeat();
+        stopStatsPolling();
+        reportOffline();
+        releaseBackgroundMediaPlayer();
+        super.onDestroy();
+    }
 
-private void resumeBackgroundVideoIfNeeded() {
+    // ========== 统计系统 ==========
+
+    private String getDeviceId() {
+        // 使用 Android 设备固定标识（ANDROID_ID），卸载重装也不变
+        String id = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+        if (id == null || id.isEmpty()) {
+            // 极少数设备可能取不到，fallback 到 UUID
+            id = prefs.getString(KEY_DEVICE_ID, "");
+            if (id.isEmpty()) {
+                id = java.util.UUID.randomUUID().toString();
+                prefs.edit().putString(KEY_DEVICE_ID, id).apply();
+            }
+        }
+        return id;
+    }
+
+    private void sendStatsRequest(String endpoint) {
+        String deviceId = getDeviceId();
+        if (deviceId.isEmpty()) return;
+        AppExecutors.runOnIo(() -> {
+            try {
+                java.net.URL url = new java.net.URL(STATS_BASE_URL + endpoint);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                String json = "{\"json\":{\"deviceId\":\"" + deviceId + "\"}}";
+                java.io.OutputStream os = conn.getOutputStream();
+                os.write(json.getBytes("UTF-8"));
+                os.flush();
+                os.close();
+                int code = conn.getResponseCode();
+                conn.disconnect();
+            } catch (Throwable ignored) { }
+        });
+    }
+
+    private void reportLaunch() {
+        sendStatsRequest("/api/trpc/stats.launch");
+    }
+
+    private void startHeartbeat() {
+        stopHeartbeat();
+        statsHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        heartbeatTask = new Runnable() {
+            @Override
+            public void run() {
+                sendStatsRequest("/api/trpc/stats.heartbeat");
+                if (statsHandler != null) {
+                    statsHandler.postDelayed(this, 60 * 1000);
+                }
+            }
+        };
+        // 首次立即发送，不用等60秒
+        heartbeatTask.run();
+    }
+
+    private void stopHeartbeat() {
+        if (statsHandler != null && heartbeatTask != null) {
+            statsHandler.removeCallbacks(heartbeatTask);
+        }
+        statsHandler = null;
+        heartbeatTask = null;
+    }
+
+    private void reportOffline() {
+        sendStatsRequest("/api/trpc/stats.offline");
+    }
+private void startStatsPolling() {
+        stopStatsPolling();
+        statsPollHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        statsPollTask = new Runnable() {
+            @Override
+            public void run() {
+                fetchStatsOverview();
+                if (statsPollHandler != null) {
+                    int interval = isMobileData() ? 60 * 1000 : 30 * 1000;
+                    statsPollHandler.postDelayed(this, interval);
+                }
+            }
+        };
+        statsPollTask.run();
+    }
+
+    private boolean isMobileData() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            android.net.NetworkInfo info = cm.getActiveNetworkInfo();
+            return info != null && info.getType() == android.net.ConnectivityManager.TYPE_MOBILE;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private void stopStatsPolling() {
+        if (statsPollHandler != null && statsPollTask != null) {
+            statsPollHandler.removeCallbacks(statsPollTask);
+        }
+        statsPollHandler = null;
+        statsPollTask = null;
+    }
+
+    private void fetchStatsOverview() {
+        AppExecutors.runOnIo(() -> {
+            try {
+                URL url = new URL(STATS_BASE_URL + "/api/trpc/stats.overview");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line);
+                    br.close();
+                    org.json.JSONObject root = new org.json.JSONObject(sb.toString());
+                    org.json.JSONObject data = root.optJSONObject("result");
+                    if (data != null) data = data.optJSONObject("data");
+                    if (data != null) data = data.optJSONObject("json");
+                    final String onlineStr = String.valueOf(data != null ? data.optInt("onlineNow", 0) : 0);
+                    final String todayStr = String.valueOf(data != null ? data.optInt("todayLaunches", 0) : 0);
+                    runOnUiThread(() -> {
+                        if (statsOvOnline != null) statsOvOnline.setText("在线\n" + onlineStr);
+                        if (statsOvToday != null) statsOvToday.setText("今日使用\n" + todayStr);
+                    });
+                }
+            } catch (Throwable ignored) {}
+        });
+    }
+
+    private void resumeBackgroundVideoIfNeeded() {
     if (prefs == null || !"video".equals(prefs.getString(KEY_CUSTOM_BACKGROUND_TYPE, "image"))) return;
     if (backgroundMediaPlayer != null) {
         try { if (!backgroundMediaPlayer.isPlaying()) backgroundMediaPlayer.start(); } catch (Throwable ignored) { }
