@@ -39,6 +39,7 @@ import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
+import android.view.DisplayCutout;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -185,7 +186,8 @@ private static final String KEY_METADATA_SOURCE = "metadata_source";
     private static final String KEY_KR_COMPAT_MODE = "kr_compat_mode";
 private static final String KEY_KR_ENGINE_VERSION = "kr_engine_version";
 private static final String KEY_KR_SCOPED_SAVE_DIR = "kr_scoped_save_dir";
-private static final String KEY_ARTEMIS_SCOPED_SAVE_DIR = "artemis_scoped_save_dir";
+    private static final String KEY_ARTEMIS_SCOPED_SAVE_DIR = "artemis_scoped_save_dir";
+    private static final String KEY_CUTOUT_ENABLED = "cutout_enabled";
     private static final long STORAGE_PROBE_TIMEOUT_MS = 1000L;
     private StorageProbeResult lastStorageProbeResult;
     private long lastStorageProbeAt;
@@ -326,6 +328,17 @@ applyImmersiveToWindow(window);
                 | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                 | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         );
+        // 根据设置开关控制挖孔屏适配
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            boolean cutoutEnabled = prefs != null && prefs.getBoolean(KEY_CUTOUT_ENABLED, false);
+            WindowManager.LayoutParams attrs = window.getAttributes();
+            if (cutoutEnabled) {
+                attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            } else {
+                attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER;
+            }
+            window.setAttributes(attrs);
+        }
     }
 
     private void setupLaunchers() {
@@ -3016,6 +3029,9 @@ String rematchItem = "重新匹配" + sourceLabel;
         fontResetLp.topMargin = dp(6);
         root.addView(fontReset, fontResetLp);
 
+        CheckBox cutoutCheck = krCheckBox("适配挖孔屏/全面屏", prefs.getBoolean(KEY_CUTOUT_ENABLED, false));
+        root.addView(cutoutCheck);
+
         CheckBox autoScanCheck = krCheckBox("进入应用时自动扫描上次目录", prefs == null || prefs.getBoolean(KEY_AUTO_SCAN_ON_STARTUP, true));
         root.addView(autoScanCheck);
 
@@ -3202,7 +3218,8 @@ String rematchItem = "重新匹配" + sourceLabel;
 .putBoolean(KEY_KR_COMPAT_MODE, krCompatMode.isChecked())
 .putBoolean(KEY_KR_SCOPED_SAVE_DIR, krScopedSaveDir.isChecked())
 .putBoolean(KEY_ARTEMIS_SCOPED_SAVE_DIR, artemisScopedSaveDir.isChecked())
-.putFloat(UiScaleUtil.KEY_UI_FONT_SCALE, fontScale)
+.putBoolean(KEY_CUTOUT_ENABLED, cutoutCheck.isChecked())
+                    .putFloat(UiScaleUtil.KEY_UI_FONT_SCALE, fontScale)
                     .apply();
             applyCustomBackground();
             Toast.makeText(this, "已保存设置，扫描深度：" + depth + " 层，字体：" + UiScaleUtil.percent(fontScale) + "%", Toast.LENGTH_SHORT).show();
