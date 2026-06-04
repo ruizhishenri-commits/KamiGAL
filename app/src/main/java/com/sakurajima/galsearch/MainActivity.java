@@ -7822,7 +7822,87 @@ private void pauseBackgroundVideoIfNeeded() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(16), dp(16), dp(16));
-        buildImageSearchPage(root);
+
+        // 标题
+        TextView title = new TextView(this);
+        title.setText("识图识别 Galgame");
+        title.setTextColor(getColorCompat(R.color.yh_text));
+        title.setTextSize(20);
+        title.setTypeface(null, Typeface.BOLD);
+        title.setPadding(0, 0, 0, dp(16));
+        root.addView(title);
+
+        // 选择图片按钮
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        TextView pickBtn = new TextView(this);
+        pickBtn.setLayoutParams(new LinearLayout.LayoutParams(0, dp(44), 1));
+        pickBtn.setGravity(android.view.Gravity.CENTER);
+        pickBtn.setBackgroundDrawable(getDrawable(R.drawable.bg_yuki_button));
+        pickBtn.setText("🖼 选择图片");
+        pickBtn.setTextColor(0xFF071221);
+        pickBtn.setTextSize(14);
+        pickBtn.setTypeface(null, android.graphics.Typeface.BOLD);
+        btnRow.addView(pickBtn);
+        root.addView(btnRow);
+
+        // 提示文字
+        TextView hint = new TextView(this);
+        hint.setText("上传 Galgame 截图，自动识别游戏名称和角色信息");
+        hint.setTextColor(getColorCompat(R.color.yh_text_muted));
+        hint.setTextSize(11);
+        hint.setPadding(dp(4), dp(10), dp(4), dp(4));
+        root.addView(hint);
+
+        // 图片预览区域
+        FrameLayout previewArea = new FrameLayout(this);
+        previewArea.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(200)));
+        previewArea.setBackgroundDrawable(getDrawable(R.drawable.bg_input));
+        previewArea.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+        ImageView preview = new ImageView(this);
+        preview.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
+        preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        preview.setVisibility(View.GONE);
+        int previewId = View.generateViewId();
+        imgSearchPreviewId = previewId;
+        preview.setId(previewId);
+        previewArea.addView(preview);
+
+        TextView placeholder = new TextView(this);
+        placeholder.setLayoutParams(new FrameLayout.LayoutParams(-2, -2, android.view.Gravity.CENTER));
+        placeholder.setText("点击上方按钮选择图片");
+        placeholder.setTextColor(getColorCompat(R.color.yh_text_muted));
+        placeholder.setTextSize(12);
+        previewArea.addView(placeholder);
+        root.addView(previewArea);
+
+        // 状态提示
+        TextView statusText = new TextView(this);
+        statusText.setVisibility(View.GONE);
+        statusText.setTextColor(getColorCompat(R.color.yh_text_muted));
+        statusText.setTextSize(12);
+        statusText.setPadding(dp(4), dp(10), dp(4), dp(4));
+        root.addView(statusText);
+
+        // 结果容器（ScrollView）
+        ScrollView resultScroll = new ScrollView(this);
+        resultScroll.setVisibility(View.GONE);
+        LinearLayout resultArea = new LinearLayout(this);
+        resultArea.setOrientation(LinearLayout.VERTICAL);
+        resultArea.setId(View.generateViewId());
+        resultScroll.addView(resultArea, new ScrollView.LayoutParams(-1, -2));
+        root.addView(resultScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        // 图片选择点击
+        pickBtn.setOnClickListener(v -> {
+            clickFeedback(v);
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("image/*");
+            imgSearchLauncher.launch(intent);
+        });
+
         pageContent.addView(root);
     }
 
