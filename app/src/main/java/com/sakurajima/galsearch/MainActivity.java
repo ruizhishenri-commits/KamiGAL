@@ -2088,9 +2088,9 @@ private void showPortraitEmulators() { buildEmulatorsPage(pageContent); }
     private void buildEmulatorsList(LinearLayout root) {
         // 模拟器数据：{名称, 描述, 下载URL}
         String[][] emulators = {
-            {"GameHub 共存版", "GameHub 5.3.5 共存初始版", "https://github.com/ruizhishenri-commits/KamiGAL/releases"},
-            {"GameHub 普通版", "GameHub 5.3.5 初始版，经典模拟器", "https://github.com/ruizhishenri-commits/KamiGAL/releases"},
-            {"WinlatorCN", "WinlatorCN 11.0F Beta1，在Android上运行Windows应用", "https://github.com/ruizhishenri-commits/KamiGAL/releases"}
+            {"GameHub 共存版", "GameHub 5.3.5 共存初始版", "https://github.com/xm486/YukiHub/releases/download/v0.1.0/gamehub_535_gongcun_init.apk"},
+            {"GameHub 普通版", "GameHub 5.3.5 初始版，经典模拟器", "https://github.com/xm486/YukiHub/releases/download/v0.1.0/gamehub_535_init.apk"},
+            {"WinlatorCN", "WinlatorCN 11.0F Beta1，在Android上运行Windows应用", "https://github.com/xm486/YukiHub/releases/download/v0.1.0/WinlatorCN_11.0F_beta1_activity.apk"}
         };
         for (String[] emu : emulators) {
             LinearLayout card = new LinearLayout(this);
