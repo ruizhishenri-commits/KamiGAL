@@ -7859,7 +7859,7 @@ private void pauseBackgroundVideoIfNeeded() {
 
         // 图片预览区域
         FrameLayout previewArea = new FrameLayout(this);
-        previewArea.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(200)));
+        previewArea.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(320)));
         previewArea.setBackgroundDrawable(getDrawable(R.drawable.bg_input));
         previewArea.setPadding(dp(8), dp(8), dp(8), dp(8));
 
@@ -7945,7 +7945,7 @@ private void pauseBackgroundVideoIfNeeded() {
 
         // 图片预览区域
         FrameLayout previewArea = new FrameLayout(this);
-        previewArea.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(200)));
+        previewArea.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(320)));
         previewArea.setBackgroundDrawable(getDrawable(R.drawable.bg_input));
         previewArea.setPadding(dp(8), dp(8), dp(8), dp(8));
 
@@ -8324,7 +8324,7 @@ private void pauseBackgroundVideoIfNeeded() {
         try {
             Bitmap bmp = BitmapFactory.decodeStream(getContentResolver().openInputStream(uri));
             if (bmp == null) return;
-            int maxDim = 400;
+            int maxDim = 1200;
             if (bmp.getWidth() > maxDim || bmp.getHeight() > maxDim) {
                 float scale = Math.min((float) maxDim / bmp.getWidth(), (float) maxDim / bmp.getHeight());
                 Bitmap scaled = Bitmap.createScaledBitmap(bmp, Math.round(bmp.getWidth() * scale), Math.round(bmp.getHeight() * scale), true);
