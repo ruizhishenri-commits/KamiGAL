@@ -7999,7 +7999,7 @@ private void pauseBackgroundVideoIfNeeded() {
             com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
             int code = obj.get("code").getAsInt();
 
-            if (code != 17720 && code != 0) {
+            if (code != 0 && code != 17720) {
                 String msg = obj.has("zh_message") ? obj.get("zh_message").getAsString() : "识别失败(代码:" + code + ")";
                 showToast(msg);
                 return;
@@ -8021,50 +8021,49 @@ private void pauseBackgroundVideoIfNeeded() {
 
             for (int i = 0; i < data.size(); i++) {
                 com.google.gson.JsonObject item = data.get(i).getAsJsonObject();
-                String name = getJsonStr(item, "name");
-                String character = getJsonStr(item, "character");
-                String similarity = getJsonStr(item, "similarity");
-                String cartoomtitle = getJsonStr(item, "cartoomtitle");
+                boolean notConfident = item.has("not_confident") && item.get("not_confident").getAsBoolean();
 
-                LinearLayout card = new LinearLayout(this);
-                card.setOrientation(LinearLayout.VERTICAL);
-                card.setBackgroundDrawable(getDrawable(R.drawable.bg_game_card));
-                card.setPadding(dp(12), dp(12), dp(12), dp(12));
-                LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(-1, -2);
-                cardLp.setMargins(0, 0, 0, dp(8));
-                card.setLayoutParams(cardLp);
+                com.google.gson.JsonArray chars = item.getAsJsonArray("character");
+                if (chars == null || chars.size() == 0) continue;
 
-                if (name != null && !name.isEmpty()) {
-                    TextView tvName = new TextView(this);
-                    tvName.setText("🎮 " + name);
-                    tvName.setTextColor(getColorCompat(R.color.yh_text));
-                    tvName.setTextSize(16);
-                    tvName.setTypeface(null, android.graphics.Typeface.BOLD);
-                    card.addView(tvName);
-                }
-                if (cartoomtitle != null && !cartoomtitle.isEmpty()) {
-                    TextView tvCn = new TextView(this);
-                    tvCn.setText("📖 " + cartoomtitle);
-                    tvCn.setTextColor(getColorCompat(R.color.yh_primary));
-                    tvCn.setTextSize(13);
-                    card.addView(tvCn);
-                }
-                if (character != null && !character.isEmpty()) {
-                    TextView tvChar = new TextView(this);
-                    tvChar.setText("👤 角色: " + character);
-                    tvChar.setTextColor(getColorCompat(R.color.yh_text));
-                    tvChar.setTextSize(12);
-                    card.addView(tvChar);
-                }
-                if (similarity != null && !similarity.isEmpty()) {
-                    TextView tvSim = new TextView(this);
-                    tvSim.setText("📊 相似度: " + similarity);
-                    tvSim.setTextColor(getColorCompat(R.color.yh_text_muted));
-                    tvSim.setTextSize(10);
-                    card.addView(tvSim);
-                }
+                for (int j = 0; j < chars.size(); j++) {
+                    com.google.gson.JsonObject ch = chars.get(j).getAsJsonObject();
+                    String work = getJsonStr(ch, "work");
+                    String character = getJsonStr(ch, "character");
 
-                root.addView(card);
+                    LinearLayout card = new LinearLayout(this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setBackgroundDrawable(getDrawable(R.drawable.bg_game_card));
+                    card.setPadding(dp(12), dp(12), dp(12), dp(12));
+                    LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(-1, -2);
+                    cardLp.setMargins(0, 0, 0, dp(8));
+                    card.setLayoutParams(cardLp);
+
+                    if (work != null) {
+                        TextView tvWork = new TextView(this);
+                        tvWork.setText("🎮 " + work);
+                        tvWork.setTextColor(getColorCompat(R.color.yh_text));
+                        tvWork.setTextSize(16);
+                        tvWork.setTypeface(null, android.graphics.Typeface.BOLD);
+                        card.addView(tvWork);
+                    }
+                    if (character != null) {
+                        TextView tvChar = new TextView(this);
+                        tvChar.setText("👤 角色: " + character);
+                        tvChar.setTextColor(getColorCompat(R.color.yh_primary));
+                        tvChar.setTextSize(14);
+                        card.addView(tvChar);
+                    }
+                    if (notConfident) {
+                        TextView tvHint = new TextView(this);
+                        tvHint.setText("⚠️ 置信度较低，仅供参考");
+                        tvHint.setTextColor(getColorCompat(R.color.yh_text_muted));
+                        tvHint.setTextSize(10);
+                        card.addView(tvHint);
+                    }
+
+                    root.addView(card);
+                }
             }
 
             scroll.addView(root);
