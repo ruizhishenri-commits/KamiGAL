@@ -73,6 +73,7 @@
         <TextView android:id="@+id/btnAdd" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="＋添加" android:textColor="#071221" android:textSize="7sp" android:textStyle="bold" />
         <TextView android:id="@+id/btnOrientation" android:layout_width="40dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="⟲" android:textColor="#071221" android:textSize="10sp" android:textStyle="bold" />
         <TextView android:id="@+id/btnEmulators" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="模拟器" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
+        <TextView android:id="@+id/btnImageSearch" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="识图" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
         <TextView android:id="@+id/btnSettings" android:layout_width="62dp" android:layout_height="28dp" android:layout_marginStart="6dp" android:gravity="center" android:background="@drawable/bg_yuki_button" android:foreground="?android:attr/selectableItemBackgroundBorderless" android:text="⚙ 设置" android:textColor="#071221" android:textSize="9sp" android:textStyle="bold" />
     </LinearLayout>
 
@@ -314,6 +315,17 @@ android:padding="5dp">
                 android:layout_weight="1"
                 android:gravity="center"
                 android:text="模拟器"
+                android:textColor="#B9D8FF"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/navImageSearch"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="识图"
                 android:textColor="#B9D8FF"
                 android:textSize="10sp"
                 android:textStyle="bold" />

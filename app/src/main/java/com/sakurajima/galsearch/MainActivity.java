@@ -215,10 +215,10 @@ private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
     private FrameLayout pageContent;
     private LinearLayout bottomNav;
     private View btnOrientation;
-    private TextView navLibrary, navSearchPage, navProfile, navSettingsPage, navEmulators;
+    private TextView navLibrary, navSearchPage, navProfile, navSettingsPage, navEmulators, navImageSearch;
     private boolean isPortrait = false;
     private String pendingSearchQuery = null;
-    private View[] portraitPages = new View[5];
+    private View[] portraitPages = new View[6];
     private SharedPreferences prefs;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
@@ -472,13 +472,14 @@ applyImmersiveToWindow(window);
     }
 
     private void switchPortraitPage(int page) {
-        if (navLibrary == null) return;
-        navLibrary.setTextColor(page == 0 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
-        navSearchPage.setTextColor(page == 1 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
-        navProfile.setTextColor(page == 2 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
-        navSettingsPage.setTextColor(page == 4 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
-        navEmulators.setTextColor(page == 3 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
-        pageContent.removeAllViews();
+if (navLibrary == null) return;
+navLibrary.setTextColor(page == 0 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+navSearchPage.setTextColor(page == 1 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+navProfile.setTextColor(page == 2 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+navEmulators.setTextColor(page == 3 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+navSettingsPage.setTextColor(page == 4 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+navImageSearch.setTextColor(page == 5 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+pageContent.removeAllViews();
 
         // 管理统计轮询：离开个人资料页时停止，进入时启动
         if (page != 2) stopStatsPolling();
@@ -496,6 +497,7 @@ applyImmersiveToWindow(window);
             case 2: showPortraitProfile(); break;
             case 3: showPortraitEmulators(); break;
             case 4: showPortraitSettings(); break;
+            case 5: showPortraitImageSearch(); break;
         }
         if (pageContent.getChildCount() > 0) {
             portraitPages[page] = pageContent.getChildAt(0);
@@ -1934,11 +1936,13 @@ View addButton = findViewById(R.id.btnAdd);
         ivScanLoading = findViewById(R.id.ivScanLoading);
   View settingsButton = findViewById(R.id.btnSettings);
         View emulatorsButton = findViewById(R.id.btnEmulators);
-        btnOrientation = findViewById(R.id.btnOrientation);
-        applyTopActionFeedback(settingsButton);
- applyTopActionFeedback(scanButton);
- applyTopActionFeedback(settingsButton);
-        applyTopActionFeedback(emulatorsButton);
+View imageSearchButton = findViewById(R.id.btnImageSearch);
+btnOrientation = findViewById(R.id.btnOrientation);
+applyTopActionFeedback(settingsButton);
+applyTopActionFeedback(scanButton);
+applyTopActionFeedback(settingsButton);
+applyTopActionFeedback(emulatorsButton);
+applyTopActionFeedback(imageSearchButton);
  if (btnOrientation != null) {
             applyTopActionFeedback(btnOrientation);
             btnOrientation.setOnClickListener(v -> { clickFeedback(v); toggleOrientation(); });
@@ -1948,6 +1952,7 @@ scanButton.setOnClickListener(v -> { clickFeedback(v); scanLastRootOrChoose(); }
 scanButton.setOnLongClickListener(v -> { clickFeedback(v); scanDirLauncher.launch(null); return true; });
 settingsButton.setOnClickListener(v -> { clickFeedback(v); showSettingsDialog(); });
         emulatorsButton.setOnClickListener(v -> { clickFeedback(v); showEmulatorsDialog(); });
+imageSearchButton.setOnClickListener(v -> { clickFeedback(v); showImageSearchDialog(); });
 View btnOnlineSearch = findViewById(R.id.btnOnlineSearch);
 if (btnOnlineSearch != null) btnOnlineSearch.setOnClickListener(v -> { clickFeedback(v); showOnlineSearchDialog(); });
         View btnAbout = findViewById(R.id.btnAbout);
@@ -1973,11 +1978,14 @@ bindFilter(R.id.filterPlaying, "PLAYING"); bindFilter(R.id.filterCompleted, "COM
         navProfile = findViewById(R.id.navProfile);
         navSettingsPage = findViewById(R.id.navSettingsPage);
         navEmulators = findViewById(R.id.navEmulators);
-        if (navLibrary != null) navLibrary.setOnClickListener(v -> switchPortraitPage(0));
-        if (navSearchPage != null) navSearchPage.setOnClickListener(v -> switchPortraitPage(1));
-        if (navProfile != null) navProfile.setOnClickListener(v -> switchPortraitPage(2));
-        if (navEmulators != null) navEmulators.setOnClickListener(v -> switchPortraitPage(3));
-        if (navSettingsPage != null) navSettingsPage.setOnClickListener(v -> switchPortraitPage(4));
+navImageSearch = findViewById(R.id.navImageSearch);
+navSettingsPage = findViewById(R.id.navSettingsPage);
+if (navLibrary != null) navLibrary.setOnClickListener(v -> switchPortraitPage(0));
+if (navSearchPage != null) navSearchPage.setOnClickListener(v -> switchPortraitPage(1));
+if (navProfile != null) navProfile.setOnClickListener(v -> switchPortraitPage(2));
+if (navEmulators != null) navEmulators.setOnClickListener(v -> switchPortraitPage(3));
+if (navImageSearch != null) navImageSearch.setOnClickListener(v -> switchPortraitPage(5));
+if (navSettingsPage != null) navSettingsPage.setOnClickListener(v -> switchPortraitPage(4));
         // 默认横屏启动
 // 根据保存的方向偏好设置UI布局（系统方向已在onCreate中通过setRequestedOrientation设置）
             boolean savedPortrait = prefs.getBoolean("pref_portrait_mode", false);
@@ -7804,5 +7812,315 @@ private void pauseBackgroundVideoIfNeeded() {
     try { if (backgroundMediaPlayer != null && backgroundMediaPlayer.isPlaying()) backgroundMediaPlayer.pause(); } catch (Throwable ignored) { }
 }
 
+    // ========== 图片识别Gal（AnimeTrace） ==========
+    private static final int IMGSEARCH_PICK_IMAGE = 9101;
+    private String imgSearchPendingPath = null;
+
+    private void showPortraitImageSearch() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(16), dp(16), dp(16), dp(16));
+        buildImageSearchPage(root);
+        pageContent.addView(root);
+    }
+
+    private void showImageSearchDialog() {
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this).create();
+        dialog.setTitle("📷 识图识别Galgame");
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(16), dp(16), dp(16), dp(16));
+        buildImageSearchPage(root);
+        scroll.addView(root);
+        dialog.setView(scroll);
+        dialog.setButton(android.app.AlertDialog.BUTTON_NEGATIVE, "关闭", (d, w) -> d.dismiss());
+        dialog.show();
+        styleAlertDialogDark(dialog);
+    }
+
+    private void buildImageSearchPage(LinearLayout root) {
+        TextView hint = new TextView(this);
+        hint.setText("上传Galgame截图，识别游戏名称和角色信息");
+        hint.setTextColor(getColorCompat(R.color.yh_text_muted));
+        hint.setTextSize(13);
+        root.addView(hint);
+
+        root.addView(new View(this) {{ setLayoutParams(new LinearLayout.LayoutParams(-1, dp(12))); }});
+
+        // 图片预览区域
+        FrameLayout previewArea = new FrameLayout(this);
+        previewArea.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(200)));
+        previewArea.setBackgroundDrawable(getDrawable(R.drawable.bg_input));
+        previewArea.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+        ImageView preview = new ImageView(this);
+        preview.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
+        preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        preview.setVisibility(View.GONE);
+        previewArea.addView(preview);
+
+        TextView placeholder = new TextView(this);
+        placeholder.setLayoutParams(new FrameLayout.LayoutParams(-2, -2, android.view.Gravity.CENTER));
+        placeholder.setText("点击下方按钮选择图片");
+        placeholder.setTextColor(getColorCompat(R.color.yh_text_muted));
+        placeholder.setTextSize(12);
+        previewArea.addView(placeholder);
+        root.addView(previewArea);
+
+        root.addView(new View(this) {{ setLayoutParams(new LinearLayout.LayoutParams(-1, dp(12))); }});
+
+        // 按钮行
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        btnRow.setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
+
+        TextView pickBtn = new TextView(this);
+        pickBtn.setLayoutParams(new LinearLayout.LayoutParams(0, dp(36), 1));
+        pickBtn.setGravity(android.view.Gravity.CENTER);
+        pickBtn.setBackgroundDrawable(getDrawable(R.drawable.bg_yuki_button));
+        pickBtn.setText("🖼 选择图片");
+        pickBtn.setTextColor(0xFF071221);
+        pickBtn.setTextSize(12);
+        pickBtn.setTypeface(null, android.graphics.Typeface.BOLD);
+        btnRow.addView(pickBtn);
+
+        root.addView(btnRow);
+
+        // 结果显示区域
+        root.addView(new View(this) {{ setLayoutParams(new LinearLayout.LayoutParams(-1, dp(12))); }});
+        TextView resultTitle = new TextView(this);
+        resultTitle.setText("识别结果");
+        resultTitle.setTextColor(getColorCompat(R.color.yh_text));
+        resultTitle.setTextSize(15);
+        resultTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        resultTitle.setVisibility(View.GONE);
+        resultTitle.setId(android.R.id.text1);
+        root.addView(resultTitle);
+
+        LinearLayout resultArea = new LinearLayout(this);
+        resultArea.setOrientation(LinearLayout.VERTICAL);
+        resultArea.setId(android.R.id.content);
+        root.addView(resultArea);
+
+        // 图片选择点击
+        pickBtn.setOnClickListener(v -> {
+            clickFeedback(v);
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("image/*");
+            imgSearchLauncher.launch(intent);
+        });
+    }
+
+    private final ActivityResultLauncher<Intent> imgSearchLauncher = registerForActivityResult(
+        new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() != RESULT_OK || result.getData() == null) return;
+            Uri uri = result.getData().getData();
+            if (uri == null) return;
+            doImageSearch(uri);
+        });
+
+    private void doImageSearch(Uri imageUri) {
+        try {
+            // 读取图片并压缩（API限制最大4MB）
+            Bitmap bitmap = BitmapFactory.decodeStream(getContentResolver().openInputStream(imageUri));
+            if (bitmap == null) {
+                showToast("无法读取图片");
+                return;
+            }
+            // 压缩到最大1200px宽/高
+            int maxDim = 1200;
+            if (bitmap.getWidth() > maxDim || bitmap.getHeight() > maxDim) {
+                float scale = Math.min((float) maxDim / bitmap.getWidth(), (float) maxDim / bitmap.getHeight());
+                int newW = Math.round(bitmap.getWidth() * scale);
+                int newH = Math.round(bitmap.getHeight() * scale);
+                Bitmap scaled = Bitmap.createScaledBitmap(bitmap, newW, newH, true);
+                bitmap.recycle();
+                bitmap = scaled;
+            }
+
+            // 转成JPEG Base64
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, baos);
+            bitmap.recycle();
+            byte[] imageBytes = baos.toByteArray();
+            String base64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP);
+
+            // 更新预览
+            runOnUiThread(() -> {
+                // 找到预览控件更新图片
+                showToast("正在识别中，请稍候…");
+            });
+
+            // 调用API
+            new Thread(() -> {
+                try {
+                    String result = callAnimeTraceApi(base64);
+                    runOnUiThread(() -> showImageSearchResult(result, imageUri));
+                } catch (Exception e) {
+                    runOnUiThread(() -> showToast("识别失败: " + e.getMessage()));
+                }
+            }).start();
+
+        } catch (Exception e) {
+            showToast("图片处理失败: " + e.getMessage());
+        }
+    }
+
+    private String callAnimeTraceApi(String base64Image) throws Exception {
+        java.net.URL url = new java.net.URL("https://api.animetrace.com/v1/search");
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(30000);
+        conn.setReadTimeout(60000);
+
+        String body = "base64=" + java.net.URLEncoder.encode(base64Image, "UTF-8")
+            + "&model=" + java.net.URLEncoder.encode("animetrace_high_beta", "UTF-8")
+            + "&is_multi=1";
+
+        java.io.OutputStream os = conn.getOutputStream();
+        os.write(body.getBytes("UTF-8"));
+        os.flush();
+        os.close();
+
+        int code = conn.getResponseCode();
+        java.io.InputStream is = (code == 200) ? conn.getInputStream() : conn.getErrorStream();
+        String resp = new java.util.Scanner(is, "UTF-8").useDelimiter("\\A").next();
+        is.close();
+        conn.disconnect();
+        return resp;
+    }
+
+    private void showImageSearchResult(String json, Uri imageUri) {
+        try {
+            com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            int code = obj.get("code").getAsInt();
+
+            if (code != 17720 && code != 0) {
+                String msg = obj.has("zh_message") ? obj.get("zh_message").getAsString() : "识别失败(代码:" + code + ")";
+                showToast(msg);
+                return;
+            }
+
+            com.google.gson.JsonArray data = obj.getAsJsonArray("data");
+            if (data == null || data.size() == 0) {
+                showToast("未识别到游戏信息，换张清晰点的截图试试～");
+                return;
+            }
+
+            // 弹结果对话框
+            android.app.AlertDialog resultDialog = new android.app.AlertDialog.Builder(this).create();
+            resultDialog.setTitle("🎯 识别结果");
+            ScrollView scroll = new ScrollView(this);
+            LinearLayout root = new LinearLayout(this);
+            root.setOrientation(LinearLayout.VERTICAL);
+            root.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+            for (int i = 0; i < data.size(); i++) {
+                com.google.gson.JsonObject item = data.get(i).getAsJsonObject();
+                String name = getJsonStr(item, "name");
+                String character = getJsonStr(item, "character");
+                String similarity = getJsonStr(item, "similarity");
+                String cartoomtitle = getJsonStr(item, "cartoomtitle");
+
+                LinearLayout card = new LinearLayout(this);
+                card.setOrientation(LinearLayout.VERTICAL);
+                card.setBackgroundDrawable(getDrawable(R.drawable.bg_game_card));
+                card.setPadding(dp(12), dp(12), dp(12), dp(12));
+                LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(-1, -2);
+                cardLp.setMargins(0, 0, 0, dp(8));
+                card.setLayoutParams(cardLp);
+
+                if (name != null && !name.isEmpty()) {
+                    TextView tvName = new TextView(this);
+                    tvName.setText("🎮 " + name);
+                    tvName.setTextColor(getColorCompat(R.color.yh_text));
+                    tvName.setTextSize(16);
+                    tvName.setTypeface(null, android.graphics.Typeface.BOLD);
+                    card.addView(tvName);
+                }
+                if (cartoomtitle != null && !cartoomtitle.isEmpty()) {
+                    TextView tvCn = new TextView(this);
+                    tvCn.setText("📖 " + cartoomtitle);
+                    tvCn.setTextColor(getColorCompat(R.color.yh_primary));
+                    tvCn.setTextSize(13);
+                    card.addView(tvCn);
+                }
+                if (character != null && !character.isEmpty()) {
+                    TextView tvChar = new TextView(this);
+                    tvChar.setText("👤 角色: " + character);
+                    tvChar.setTextColor(getColorCompat(R.color.yh_text));
+                    tvChar.setTextSize(12);
+                    card.addView(tvChar);
+                }
+                if (similarity != null && !similarity.isEmpty()) {
+                    TextView tvSim = new TextView(this);
+                    tvSim.setText("📊 相似度: " + similarity);
+                    tvSim.setTextColor(getColorCompat(R.color.yh_text_muted));
+                    tvSim.setTextSize(10);
+                    card.addView(tvSim);
+                }
+
+                root.addView(card);
+            }
+
+            scroll.addView(root);
+            resultDialog.setView(scroll);
+            resultDialog.setButton(android.app.AlertDialog.BUTTON_NEGATIVE, "关闭", (d, w) -> d.dismiss());
+            resultDialog.show();
+            styleAlertDialogDark(resultDialog);
+
+            // 也更新预览
+            updateImagePreview(imageUri);
+
+        } catch (Exception e) {
+            showToast("解析结果失败: " + e.getMessage());
+        }
+    }
+
+    private String getJsonStr(com.google.gson.JsonObject obj, String key) {
+        if (obj.has(key) && !obj.get(key).isJsonNull()) {
+            String val = obj.get(key).getAsString();
+            return val.trim().isEmpty() ? null : val;
+        }
+        return null;
+    }
+
+    private void updateImagePreview(Uri uri) {
+        try {
+            // 查找当前显示的预览控件并更新
+            Bitmap bmp = BitmapFactory.decodeStream(getContentResolver().openInputStream(uri));
+            if (bmp == null) return;
+            int maxDim = 400;
+            if (bmp.getWidth() > maxDim || bmp.getHeight() > maxDim) {
+                float scale = Math.min((float) maxDim / bmp.getWidth(), (float) maxDim / bmp.getHeight());
+                Bitmap scaled = Bitmap.createScaledBitmap(bmp, Math.round(bmp.getWidth() * scale), Math.round(bmp.getHeight() * scale), true);
+                bmp.recycle();
+                bmp = scaled;
+            }
+            final Bitmap finalBmp = bmp;
+            runOnUiThread(() -> {
+                // 通过tag找预览控件
+                View root = pageContent.getChildCount() > 0 ? pageContent.getChildAt(0) : null;
+                if (root instanceof LinearLayout) {
+                    FrameLayout previewArea = (FrameLayout) ((LinearLayout) root).getChildAt(1);
+                    if (previewArea != null) {
+                        ImageView iv = (ImageView) previewArea.getChildAt(0);
+                        TextView placeholder = (TextView) previewArea.getChildAt(1);
+                        iv.setImageBitmap(finalBmp);
+                        iv.setVisibility(View.VISIBLE);
+                        placeholder.setVisibility(View.GONE);
+                    }
+                }
+            });
+        } catch (Exception ignored) {}
+    }
+
+    private void showToast(String msg) {
+        runOnUiThread(() -> android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show());
+    }
     private String emptyText(String s, String fallback) { return s == null || s.trim().isEmpty() ? fallback : s; }
 }
