@@ -7940,26 +7940,26 @@ private void pauseBackgroundVideoIfNeeded() {
                 bitmap = scaled;
             }
 
-            // 转成JPEG Base64
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, baos);
+            // 将压缩后的图片保存到缓存文件
+            java.io.File cacheDir = getCacheDir();
+            java.io.File tmpFile = new java.io.File(cacheDir, "imgsearch_temp.jpg");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpFile);
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, fos);
+            fos.close();
             bitmap.recycle();
-            byte[] imageBytes = baos.toByteArray();
-            String base64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP);
 
             // 更新预览
-            runOnUiThread(() -> {
-                // 找到预览控件更新图片
-                showToast("正在识别中，请稍候…");
-            });
+            runOnUiThread(() -> showToast("正在识别中，请稍候…"));
 
-            // 调用API
+            // 调用API（使用multipart上传文件）
             new Thread(() -> {
                 try {
-                    String result = callAnimeTraceApi(base64);
+                    String result = callAnimeTraceApiWithFile(tmpFile);
                     runOnUiThread(() -> showImageSearchResult(result, imageUri));
+                    tmpFile.delete();
                 } catch (Exception e) {
                     runOnUiThread(() -> showToast("识别失败: " + e.getMessage()));
+                    tmpFile.delete();
                 }
             }).start();
 
@@ -7968,26 +7968,56 @@ private void pauseBackgroundVideoIfNeeded() {
         }
     }
 
-    private String callAnimeTraceApi(String base64Image) throws Exception {
+    private String callAnimeTraceApiWithFile(java.io.File imageFile) throws Exception {
+        String boundary = "----KamiGAL" + System.currentTimeMillis();
+        String lineEnd = "\r\n";
         java.net.URL url = new java.net.URL("https://api.animetrace.com/v1/search");
         java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
-        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+        conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
         conn.setDoOutput(true);
+        conn.setDoInput(true);
         conn.setConnectTimeout(30000);
-        conn.setReadTimeout(60000);
+        conn.setReadTimeout(120000);
+        conn.setUseCaches(false);
 
-        String body = "base64=" + java.net.URLEncoder.encode(base64Image, "UTF-8")
-            + "&model=" + java.net.URLEncoder.encode("animetrace_high_beta", "UTF-8")
-            + "&is_multi=1";
+        java.io.DataOutputStream dos = new java.io.DataOutputStream(conn.getOutputStream());
 
-        java.io.OutputStream os = conn.getOutputStream();
-        os.write(body.getBytes("UTF-8"));
-        os.flush();
-        os.close();
+        // 文件字段
+        dos.writeBytes("--" + boundary + lineEnd);
+        dos.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"image.jpg\"" + lineEnd);
+        dos.writeBytes("Content-Type: image/jpeg" + lineEnd);
+        dos.writeBytes(lineEnd);
 
-        int code = conn.getResponseCode();
-        java.io.InputStream is = (code == 200) ? conn.getInputStream() : conn.getErrorStream();
+        // 写入文件数据
+        java.io.FileInputStream fis = new java.io.FileInputStream(imageFile);
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = fis.read(buffer)) != -1) {
+            dos.write(buffer, 0, read);
+        }
+        fis.close();
+        dos.writeBytes(lineEnd);
+
+        // model字段
+        dos.writeBytes("--" + boundary + lineEnd);
+        dos.writeBytes("Content-Disposition: form-data; name=\"model\"" + lineEnd);
+        dos.writeBytes(lineEnd);
+        dos.writeBytes("animetrace_high_beta" + lineEnd);
+
+        // is_multi字段
+        dos.writeBytes("--" + boundary + lineEnd);
+        dos.writeBytes("Content-Disposition: form-data; name=\"is_multi\"" + lineEnd);
+        dos.writeBytes(lineEnd);
+        dos.writeBytes("1" + lineEnd);
+
+        // 结束boundary
+        dos.writeBytes("--" + boundary + "--" + lineEnd);
+        dos.flush();
+        dos.close();
+
+        int httpCode = conn.getResponseCode();
+        java.io.InputStream is = (httpCode == 200) ? conn.getInputStream() : conn.getErrorStream();
         String resp = new java.util.Scanner(is, "UTF-8").useDelimiter("\\A").next();
         is.close();
         conn.disconnect();
@@ -7996,8 +8026,11 @@ private void pauseBackgroundVideoIfNeeded() {
 
     private void showImageSearchResult(String json, Uri imageUri) {
         try {
-            com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
-            int code = obj.get("code").getAsInt();
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            com.google.gson.JsonObject obj = gson.fromJson(json, com.google.gson.JsonObject.class);
+            if (obj == null) { showToast("返回数据为空"); return; }
+
+            int code = obj.has("code") ? obj.get("code").getAsInt() : -1;
 
             if (code != 0 && code != 17720) {
                 String msg = obj.has("zh_message") ? obj.get("zh_message").getAsString() : "识别失败(代码:" + code + ")";
@@ -8005,7 +8038,11 @@ private void pauseBackgroundVideoIfNeeded() {
                 return;
             }
 
-            com.google.gson.JsonArray data = obj.getAsJsonArray("data");
+            // data可能是数组也可能是空对象，安全处理
+            com.google.gson.JsonArray data = null;
+            if (obj.has("data") && obj.get("data").isJsonArray()) {
+                data = obj.getAsJsonArray("data");
+            }
             if (data == null || data.size() == 0) {
                 showToast("未识别到游戏信息，换张清晰点的截图试试～");
                 return;
@@ -8076,7 +8113,8 @@ private void pauseBackgroundVideoIfNeeded() {
             updateImagePreview(imageUri);
 
         } catch (Exception e) {
-            showToast("解析结果失败: " + e.getMessage());
+            showToast("解析结果失败: " + e.toString());
+            try { android.util.Log.e("KamiGAL", "识图解析异常", e); } catch (Throwable ignored) {}
         }
     }
 
