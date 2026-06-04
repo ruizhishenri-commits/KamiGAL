@@ -220,6 +220,7 @@ private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
     private String pendingSearchQuery = null;
     private View[] portraitPages = new View[6];
     private SharedPreferences prefs;
+    private int imgSearchPreviewId = -1;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
     private static final String KEY_SCAN_ROOT_URIS = "scan_root_uris";
@@ -7858,6 +7859,9 @@ private void pauseBackgroundVideoIfNeeded() {
         preview.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
         preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
         preview.setVisibility(View.GONE);
+        int previewId = View.generateViewId();
+        imgSearchPreviewId = previewId;
+        preview.setId(previewId);
         previewArea.addView(preview);
 
         TextView placeholder = new TextView(this);
@@ -7889,18 +7893,9 @@ private void pauseBackgroundVideoIfNeeded() {
 
         // 结果显示区域
         root.addView(new View(this) {{ setLayoutParams(new LinearLayout.LayoutParams(-1, dp(12))); }});
-        TextView resultTitle = new TextView(this);
-        resultTitle.setText("识别结果");
-        resultTitle.setTextColor(getColorCompat(R.color.yh_text));
-        resultTitle.setTextSize(15);
-        resultTitle.setTypeface(null, android.graphics.Typeface.BOLD);
-        resultTitle.setVisibility(View.GONE);
-        resultTitle.setId(android.R.id.text1);
-        root.addView(resultTitle);
-
         LinearLayout resultArea = new LinearLayout(this);
         resultArea.setOrientation(LinearLayout.VERTICAL);
-        resultArea.setId(android.R.id.content);
+        resultArea.setId(View.generateViewId());
         root.addView(resultArea);
 
         // 图片选择点击
@@ -7947,6 +7942,9 @@ private void pauseBackgroundVideoIfNeeded() {
             bitmap.compress(Bitmap.CompressFormat.JPEG, 85, fos);
             fos.close();
             bitmap.recycle();
+
+            // 立刻显示预览
+            updateImagePreview(imageUri);
 
             runOnUiThread(() -> showToast("正在识别中，请稍候…"));
 
@@ -8095,6 +8093,9 @@ private void pauseBackgroundVideoIfNeeded() {
                     cardLp.setMargins(0, 0, 0, dp(8));
                     card.setLayoutParams(cardLp);
 
+                    final String copyWork = work != null ? work : "";
+                    final String copyChar = character != null ? character : "";
+
                     if (work != null) {
                         TextView tvWork = new TextView(this);
                         tvWork.setText("🎮 " + work);
@@ -8117,6 +8118,25 @@ private void pauseBackgroundVideoIfNeeded() {
                         tvHint.setTextSize(10);
                         card.addView(tvHint);
                     }
+
+                    // 复制按钮
+                    TextView copyBtn = new TextView(this);
+                    copyBtn.setText("📋 复制");
+                    copyBtn.setTextColor(getColorCompat(R.color.yh_primary));
+                    copyBtn.setTextSize(11);
+                    copyBtn.setTypeface(null, android.graphics.Typeface.BOLD);
+                    copyBtn.setPadding(0, dp(6), 0, 0);
+                    copyBtn.setOnClickListener(v -> {
+                        String clipText = (copyWork.isEmpty() ? "" : copyWork)
+                            + (copyWork.isEmpty() || copyChar.isEmpty() ? "" : " - ")
+                            + (copyChar.isEmpty() ? "" : copyChar);
+                        if (!clipText.isEmpty()) {
+                            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("KamiGAL识图", clipText));
+                            showToast("已复制: " + clipText);
+                        }
+                    });
+                    card.addView(copyBtn);
 
                     root.addView(card);
                 }
@@ -8156,8 +8176,8 @@ private void pauseBackgroundVideoIfNeeded() {
     }
 
     private void updateImagePreview(Uri uri) {
+        if (imgSearchPreviewId <= 0) return;
         try {
-            // 查找当前显示的预览控件并更新
             Bitmap bmp = BitmapFactory.decodeStream(getContentResolver().openInputStream(uri));
             if (bmp == null) return;
             int maxDim = 400;
@@ -8169,16 +8189,14 @@ private void pauseBackgroundVideoIfNeeded() {
             }
             final Bitmap finalBmp = bmp;
             runOnUiThread(() -> {
-                // 通过tag找预览控件
-                View root = pageContent.getChildCount() > 0 ? pageContent.getChildAt(0) : null;
-                if (root instanceof LinearLayout) {
-                    FrameLayout previewArea = (FrameLayout) ((LinearLayout) root).getChildAt(1);
-                    if (previewArea != null) {
-                        ImageView iv = (ImageView) previewArea.getChildAt(0);
-                        TextView placeholder = (TextView) previewArea.getChildAt(1);
-                        iv.setImageBitmap(finalBmp);
-                        iv.setVisibility(View.VISIBLE);
-                        placeholder.setVisibility(View.GONE);
+                ImageView iv = findViewById(imgSearchPreviewId);
+                if (iv != null) {
+                    iv.setImageBitmap(finalBmp);
+                    iv.setVisibility(View.VISIBLE);
+                    // 隐藏placeholder
+                    ViewGroup parent = (ViewGroup) iv.getParent();
+                    if (parent != null && parent.getChildCount() > 1) {
+                        parent.getChildAt(1).setVisibility(View.GONE);
                     }
                 }
             });
