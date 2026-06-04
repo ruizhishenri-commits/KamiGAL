@@ -8266,7 +8266,7 @@ private void pauseBackgroundVideoIfNeeded() {
             updateImagePreview(imageUri);
 
             if (isSearchDialogShowing) {
-                // 横屏对话框模式 → 直接在当前对话框中显示结果
+                // 横屏对话框模式 → 直接在对话框中显示结果
                 if (imgSearchDialogRoot != null) {
                     imgSearchDialogRoot.removeAllViews();
                     TextView title = new TextView(this);
@@ -8278,6 +8278,20 @@ private void pauseBackgroundVideoIfNeeded() {
                     imgSearchDialogRoot.addView(title);
                     for (LinearLayout card : cards) imgSearchDialogRoot.addView(card);
                 }
+            } else if (getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+                // 横屏但对话框已被系统关闭 → 重新弹结果对话框
+                android.app.AlertDialog resultDialog = new android.app.AlertDialog.Builder(this).create();
+                resultDialog.setTitle("🎯 识别结果");
+                ScrollView scroll = new ScrollView(this);
+                LinearLayout root = new LinearLayout(this);
+                root.setOrientation(LinearLayout.VERTICAL);
+                root.setPadding(dp(12), dp(12), dp(12), dp(12));
+                for (LinearLayout card : cards) root.addView(card);
+                scroll.addView(root);
+                resultDialog.setView(scroll);
+                resultDialog.setButton(android.app.AlertDialog.BUTTON_NEGATIVE, "关闭", (d, w) -> d.dismiss());
+                resultDialog.show();
+                styleAlertDialogDark(resultDialog);
             } else {
                 // 竖屏模式 → 直接在页面内显示
                 ScrollView resultScroll = findViewById(imgSearchScrollId);
