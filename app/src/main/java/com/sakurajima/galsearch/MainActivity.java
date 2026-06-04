@@ -224,7 +224,7 @@ private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
     private int imgSearchResultAreaId = -1;
     private int imgSearchStatusId = -1;
     private int imgSearchScrollId = -1;
-    private View imgSearchDialogRoot = null;
+    private LinearLayout imgSearchDialogRoot = null;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
     private static final String KEY_SCAN_ROOT_URIS = "scan_root_uris";
@@ -7921,10 +7921,10 @@ private void pauseBackgroundVideoIfNeeded() {
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this).create();
         dialog.setTitle("📷 识图识别Galgame");
         ScrollView scroll = new ScrollView(this);
-        imgSearchDialogRoot = scroll;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(16), dp(16), dp(16));
+        imgSearchDialogRoot = root;
         buildImageSearchPage(root);
         scroll.addView(root);
         dialog.setView(scroll);
@@ -8266,19 +8266,18 @@ private void pauseBackgroundVideoIfNeeded() {
             updateImagePreview(imageUri);
 
             if (isSearchDialogShowing) {
-                // 横屏对话框模式 → 弹 AlertDialog
-                android.app.AlertDialog resultDialog = new android.app.AlertDialog.Builder(this).create();
-                resultDialog.setTitle("🎯 识别结果");
-                ScrollView scroll = new ScrollView(this);
-                LinearLayout root = new LinearLayout(this);
-                root.setOrientation(LinearLayout.VERTICAL);
-                root.setPadding(dp(12), dp(12), dp(12), dp(12));
-                for (LinearLayout card : cards) root.addView(card);
-                scroll.addView(root);
-                resultDialog.setView(scroll);
-                resultDialog.setButton(android.app.AlertDialog.BUTTON_NEGATIVE, "关闭", (d, w) -> d.dismiss());
-                resultDialog.show();
-                styleAlertDialogDark(resultDialog);
+                // 横屏对话框模式 → 直接在当前对话框中显示结果
+                if (imgSearchDialogRoot != null) {
+                    imgSearchDialogRoot.removeAllViews();
+                    TextView title = new TextView(this);
+                    title.setText("🎯 识别结果");
+                    title.setTextColor(getColorCompat(R.color.yh_text));
+                    title.setTextSize(18);
+                    title.setTypeface(null, android.graphics.Typeface.BOLD);
+                    title.setPadding(0, 0, 0, dp(12));
+                    imgSearchDialogRoot.addView(title);
+                    for (LinearLayout card : cards) imgSearchDialogRoot.addView(card);
+                }
             } else {
                 // 竖屏模式 → 直接在页面内显示
                 ScrollView resultScroll = findViewById(imgSearchScrollId);
