@@ -7940,47 +7940,91 @@ private void pauseBackgroundVideoIfNeeded() {
                 bitmap = scaled;
             }
 
-            // 转成JPEG Base64
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, baos);
+            // 保存到缓存文件用于multipart上传
+            java.io.File cacheDir = getCacheDir();
+            java.io.File tmpFile = new java.io.File(cacheDir, "imgsearch_temp.jpg");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpFile);
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, fos);
+            fos.close();
             bitmap.recycle();
-            byte[] imageBytes = baos.toByteArray();
-            String base64 = android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP);
 
             runOnUiThread(() -> showToast("正在识别中，请稍候…"));
 
-            // 调用API（用base64参数，URLEncoder编码）
+            // 调用API（用multipart上传文件）
             new Thread(() -> {
                 try {
-                    String result = callAnimeTraceApiWithBase64(base64);
+                    String result = callAnimeTraceApiWithMultipart(tmpFile);
+                    android.util.Log.i("KamiGAL", "API响应: " + (result != null ? result.substring(0, Math.min(result.length(), 200)) : "null"));
                     runOnUiThread(() -> showImageSearchResult(result, imageUri));
                 } catch (Exception e) {
+                    android.util.Log.e("KamiGAL", "API调用失败", e);
                     runOnUiThread(() -> showToast("识别失败: " + e.toString()));
+                } finally {
+                    tmpFile.delete();
                 }
             }).start();
 
         } catch (Exception e) {
+            android.util.Log.e("KamiGAL", "图片处理失败", e);
             showToast("图片处理失败: " + e.toString());
         }
     }
 
-    private String callAnimeTraceApiWithBase64(String base64Image) throws Exception {
+    private String callAnimeTraceApiWithMultipart(java.io.File imageFile) throws Exception {
+        String boundary = "----KamiGAL" + System.currentTimeMillis();
+        String lineEnd = "\r\n";
         java.net.URL url = new java.net.URL("https://api.animetrace.com/v1/search");
         java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
-        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+        conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
         conn.setDoOutput(true);
+        conn.setDoInput(true);
         conn.setConnectTimeout(30000);
         conn.setReadTimeout(120000);
         conn.setUseCaches(false);
 
-        StringBuilder body = new StringBuilder();
-        body.append("base64=").append(java.net.URLEncoder.encode(base64Image, "UTF-8"));
-        body.append("&model=").append(java.net.URLEncoder.encode("animetrace_high_beta", "UTF-8"));
-        body.append("&is_multi=1");
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
 
+        // 工具函数：写入文本字段
+        byte[] boundaryBytes = ("--" + boundary + lineEnd).getBytes("UTF-8");
+        byte[] lineEndBytes = lineEnd.getBytes("UTF-8");
+
+        // file字段
+        bos.write(boundaryBytes);
+        bos.write(("Content-Disposition: form-data; name=\"file\"; filename=\"image.jpg\"" + lineEnd).getBytes("UTF-8"));
+        bos.write(("Content-Type: image/jpeg" + lineEnd).getBytes("UTF-8"));
+        bos.write(lineEndBytes);
+        java.io.FileInputStream fis = new java.io.FileInputStream(imageFile);
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = fis.read(buf)) != -1) bos.write(buf, 0, n);
+        fis.close();
+        bos.write(lineEndBytes);
+
+        // model字段
+        bos.write(boundaryBytes);
+        bos.write(("Content-Disposition: form-data; name=\"model\"" + lineEnd).getBytes("UTF-8"));
+        bos.write(lineEndBytes);
+        bos.write("animetrace_high_beta".getBytes("UTF-8"));
+        bos.write(lineEndBytes);
+
+        // is_multi字段
+        bos.write(boundaryBytes);
+        bos.write(("Content-Disposition: form-data; name=\"is_multi\"" + lineEnd).getBytes("UTF-8"));
+        bos.write(lineEndBytes);
+        bos.write("1".getBytes("UTF-8"));
+        bos.write(lineEndBytes);
+
+        // 结束boundary
+        bos.write(("--" + boundary + "--" + lineEnd).getBytes("UTF-8"));
+        bos.flush();
+
+        // 写入输出流
+        byte[] requestData = bos.toByteArray();
+        bos.close();
+        conn.setRequestProperty("Content-Length", String.valueOf(requestData.length));
         java.io.OutputStream os = conn.getOutputStream();
-        os.write(body.toString().getBytes("UTF-8"));
+        os.write(requestData);
         os.flush();
         os.close();
 
@@ -8025,14 +8069,21 @@ private void pauseBackgroundVideoIfNeeded() {
             root.setPadding(dp(12), dp(12), dp(12), dp(12));
 
             for (int i = 0; i < data.size(); i++) {
-                com.google.gson.JsonObject item = data.get(i).getAsJsonObject();
+                com.google.gson.JsonElement elem = data.get(i);
+                if (elem == null || !elem.isJsonObject()) continue;
+                com.google.gson.JsonObject item = elem.getAsJsonObject();
                 boolean notConfident = item.has("not_confident") && item.get("not_confident").getAsBoolean();
 
-                com.google.gson.JsonArray chars = item.getAsJsonArray("character");
+                com.google.gson.JsonArray chars = null;
+                if (item.has("character") && item.get("character").isJsonArray()) {
+                    chars = item.getAsJsonArray("character");
+                }
                 if (chars == null || chars.size() == 0) continue;
 
                 for (int j = 0; j < chars.size(); j++) {
-                    com.google.gson.JsonObject ch = chars.get(j).getAsJsonObject();
+                    com.google.gson.JsonElement chElem = chars.get(j);
+                    if (chElem == null || !chElem.isJsonObject()) continue;
+                    com.google.gson.JsonObject ch = chElem.getAsJsonObject();
                     String work = getJsonStr(ch, "work");
                     String character = getJsonStr(ch, "character");
 
@@ -8083,10 +8134,16 @@ private void pauseBackgroundVideoIfNeeded() {
         } catch (Exception e) {
             String errMsg = "解析失败: " + e.toString();
             if (json != null && json.length() > 0) {
-                errMsg += " | 原始响应: " + (json.length() > 100 ? json.substring(0, 100) : json);
+                errMsg += " | 响应: " + (json.length() > 150 ? json.substring(0, 150) : json);
             }
+            // 把堆栈写入日志
+            try {
+                java.io.StringWriter sw = new java.io.StringWriter();
+                java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+                e.printStackTrace(pw);
+                android.util.Log.e("KamiGAL", "解析异常堆栈:\n" + sw.toString());
+            } catch (Throwable ignored) {}
             showToast(errMsg);
-            try { android.util.Log.e("KamiGAL", "识图解析异常, 原始响应=" + json, e); } catch (Throwable ignored) {}
         }
     }
 
