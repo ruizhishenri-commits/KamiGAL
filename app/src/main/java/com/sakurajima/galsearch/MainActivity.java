@@ -8081,8 +8081,12 @@ private void pauseBackgroundVideoIfNeeded() {
             updateImagePreview(imageUri);
 
         } catch (Exception e) {
-            showToast("解析结果失败: " + e.toString());
-            try { android.util.Log.e("KamiGAL", "识图解析异常", e); } catch (Throwable ignored) {}
+            String errMsg = "解析失败: " + e.toString();
+            if (json != null && json.length() > 0) {
+                errMsg += " | 原始响应: " + (json.length() > 100 ? json.substring(0, 100) : json);
+            }
+            showToast(errMsg);
+            try { android.util.Log.e("KamiGAL", "识图解析异常, 原始响应=" + json, e); } catch (Throwable ignored) {}
         }
     }
 
