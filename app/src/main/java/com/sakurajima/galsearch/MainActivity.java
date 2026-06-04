@@ -2088,9 +2088,9 @@ private void showPortraitEmulators() { buildEmulatorsPage(pageContent); }
     private void buildEmulatorsList(LinearLayout root) {
         // 模拟器数据：{名称, 描述, 下载URL}
         String[][] emulators = {
-            {"GameHub 共存版", "GameHub 5.3.5 共存初始版", "https://release-assets.githubusercontent.com/github-production-release-asset/1248486524/1f06dd8c-b24c-454f-a634-073a114bac6c?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-06-04T01%3A10%3A53Z&rscd=attachment%3B+filename%3Dgamehub_535_gongcun_init.apk&rsct=application%2Fvnd.android.package-archive&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-06-04T00%3A10%3A01Z&ske=2026-06-04T01%3A10%3A53Z&sks=b&skv=2018-11-09&sig=PB5R44gDDuAMJtTWevCBQNE9BcyPNrcjFVtiLNxe8No%3D"},
-            {"GameHub 普通版", "GameHub 5.3.5 初始版，经典模拟器", "https://release-assets.githubusercontent.com/github-production-release-asset/1248486524/11135d76-1e19-4aef-90a6-983013054d95?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-06-04T01%3A10%3A53Z&rscd=attachment%3B+filename%3Dgamehub_535_init.apk&rsct=application%2Fvnd.android.package-archive&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-06-04T00%3A10%3A01Z&ske=2026-06-04T01%3A10%3A53Z&sks=b&skv=2018-11-09&sig=2JS4TcLSJqPJQUfViWtrlsJMSFo5ZACfpgvzuz56wDE%3D"},
-            {"WinlatorCN", "WinlatorCN 11.0F Beta1，在Android上运行Windows应用", "https://release-assets.githubusercontent.com/github-production-release-asset/1248486524/4d87889e-24f5-4f99-92a6-bb7db223c056?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-06-04T01%3A10%3A53Z&rscd=attachment%3B+filename%3DWinlatorCN_11.0F_beta1_activity.apk&rsct=application%2Fvnd.android.package-archive&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-06-04T00%3A10%3A01Z&ske=2026-06-04T01%3A10%3A53Z&sks=b&skv=2018-11-09&sig=IWf%2BKoYnmb%2Bhd%2Bwcdwpd%2FYDdFG5eYyALgS%2B1AJiuaPc%3D"}
+            {"GameHub 共存版", "GameHub 5.3.5 共存初始版", "https://github.com/ruizhishenri-commits/KamiGAL/releases"},
+            {"GameHub 普通版", "GameHub 5.3.5 初始版，经典模拟器", "https://github.com/ruizhishenri-commits/KamiGAL/releases"},
+            {"WinlatorCN", "WinlatorCN 11.0F Beta1，在Android上运行Windows应用", "https://github.com/ruizhishenri-commits/KamiGAL/releases"}
         };
         for (String[] emu : emulators) {
             LinearLayout card = new LinearLayout(this);
