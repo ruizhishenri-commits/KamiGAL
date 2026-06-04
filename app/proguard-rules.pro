@@ -10,18 +10,32 @@
     native <methods>;
 }
 
+# KamiGAL 主应用类
+-keep class com.sakurajima.galsearch.** { *; }
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Gson / JSON 相关
+-keep class com.google.gson.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class * extends java.util.List { *; }
+-keep class * extends java.util.Map { *; }
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# 保留 tRPC/网络请求相关
+-keep class org.json.** { *; }
+-dontwarn org.json.**
+-dontnote org.json.**
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# 保留 Android 系统组件
+-keep public class * extends android.app.Activity
+-keep public class * extends android.app.Service
+-keep public class * extends android.content.BroadcastReceiver
+-keep public class * extends android.app.Application
+
+# 保留所有 public 方法（防止反射调用问题）
+-keepclassmembers class * {
+    public *;
+}
+
+# 保留行号信息方便查崩溃
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

@@ -19,8 +19,8 @@ android {
         applicationId "com.sakurajima.galsearch"
         minSdk 26
         targetSdk 33
-        versionCode 2
-versionName "1.0.2"
+versionCode 2
+        versionName "1.0.3"
         
         vectorDrawables { 
             useSupportLibrary true
@@ -47,9 +47,12 @@ versionName "1.0.2"
     }
 
     buildTypes {
+        debug {
+            minifyEnabled false
+        }
         release {
             signingConfig signingConfigs.release
-            minifyEnabled false
+            minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }

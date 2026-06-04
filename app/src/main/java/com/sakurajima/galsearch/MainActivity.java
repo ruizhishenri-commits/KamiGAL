@@ -18,11 +18,21 @@ import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.CountDownTimer;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.os.Environment;
 import android.os.UserHandle;
+import java.security.MessageDigest;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
+import android.content.pm.Signature;
+import android.util.Base64;
 import android.os.UserManager;
 import android.os.PersistableBundle;
 import android.media.MediaPlayer;
@@ -178,6 +188,26 @@ private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
     private boolean autoLibraryScanRunning = false;
     private boolean webDavAutoSyncRunning = false;
     private boolean scanLoadingAnimated = false;
+    private boolean isDetonatorActive = false;
+    private boolean isDetonatorDead = false;
+    private CountDownTimer detonatorTimer;
+    private Vibrator detonatorVibrator;
+    private CheckBox detonatorCheckRef;
+    private java.util.ArrayList<android.animation.Animator> detonatorAnimators;
+    private View detonatorAnimRoot;
+    private android.os.Handler detonatorVibrateHandler = new android.os.Handler();
+    private final Runnable detonatorVibrateTask = new Runnable() {
+        @Override
+        public void run() {
+            if (!isDetonatorActive) return;
+            if (detonatorVibrator != null && detonatorVibrator.hasVibrator()) {
+                try {
+                    detonatorVibrator.vibrate(VibrationEffect.createOneShot(1200, VibrationEffect.DEFAULT_AMPLITUDE));
+                } catch (Exception ignored) {}
+            }
+            detonatorVibrateHandler.postDelayed(this, 1000);
+        }
+    };
     private boolean isSearchDialogShowing = false;
     private ObjectAnimator scanAnimator;
     private ImageView ivScanLoading;
@@ -185,10 +215,10 @@ private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
     private FrameLayout pageContent;
     private LinearLayout bottomNav;
     private View btnOrientation;
-    private TextView navLibrary, navSearchPage, navProfile, navSettingsPage;
+    private TextView navLibrary, navSearchPage, navProfile, navSettingsPage, navEmulators;
     private boolean isPortrait = false;
     private String pendingSearchQuery = null;
-    private View[] portraitPages = new View[4];
+    private View[] portraitPages = new View[5];
     private SharedPreferences prefs;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
@@ -258,8 +288,9 @@ private ActivityResultLauncher<String[]> backupOpenLauncher;
         setContentView(R.layout.activity_main);
         enterImmersiveMode();
 
+        checkSignature();
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-
+        isDetonatorDead = prefs.getBoolean("detonator_dead", false);
         // 设置方向（与pref一致）
         boolean savedPortrait = prefs.getBoolean("pref_portrait_mode", false);
         isPortrait = savedPortrait;
@@ -278,6 +309,9 @@ private ActivityResultLauncher<String[]> backupOpenLauncher;
         reportLaunch();
         startHeartbeat();
         loadGames();
+        checkUpdate(true); // 静默检测，有更新才弹窗
+        checkNotice();
+        if (ivScanLoading != null)
         if (ivScanLoading != null) ivScanLoading.setVisibility(View.GONE);
         if (prefs != null && prefs.getBoolean(KEY_AUTO_SCAN_ON_STARTUP, false)) {
             autoScanLastRootIfAvailable();
@@ -293,6 +327,11 @@ private ActivityResultLauncher<String[]> backupOpenLauncher;
         resumeBackgroundVideoIfNeeded();
         updateProfilePanel();
         maybeAutoWebDavSync();
+        // 恢复后台中断的起爆器震动
+        if (isDetonatorActive && detonatorVibrateHandler != null) {
+            detonatorVibrateHandler.removeCallbacks(detonatorVibrateTask);
+            detonatorVibrateTask.run();
+        }
     }
 
     private boolean ensureDisclaimerAccepted() {
@@ -410,6 +449,11 @@ applyImmersiveToWindow(window);
         super.onConfigurationChanged(newConfig);
         isPortrait = newConfig.orientation == Configuration.ORIENTATION_PORTRAIT;
         updateLayoutForOrientation();
+        // 横竖屏切换时重建起爆器飘落画面（保持震动和计时不变）
+        if (isDetonatorActive) {
+            // 等布局稳定后再重建，确保屏幕尺寸已更新
+            getWindow().getDecorView().post(() -> refreshDetonatorOverlay());
+        }
     }
 
     private void updateLayoutForOrientation() {
@@ -432,7 +476,8 @@ applyImmersiveToWindow(window);
         navLibrary.setTextColor(page == 0 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
         navSearchPage.setTextColor(page == 1 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
         navProfile.setTextColor(page == 2 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
-        navSettingsPage.setTextColor(page == 3 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+        navSettingsPage.setTextColor(page == 4 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
+        navEmulators.setTextColor(page == 3 ? getColorCompat(R.color.yh_primary) : getColorCompat(R.color.yh_text));
         pageContent.removeAllViews();
 
         // 管理统计轮询：离开个人资料页时停止，进入时启动
@@ -449,7 +494,8 @@ applyImmersiveToWindow(window);
             case 0: showPortraitLibrary(); break;
             case 1: showPortraitSearch(); break;
             case 2: showPortraitProfile(); break;
-            case 3: showPortraitSettings(); break;
+            case 3: showPortraitEmulators(); break;
+            case 4: showPortraitSettings(); break;
         }
         if (pageContent.getChildCount() > 0) {
             portraitPages[page] = pageContent.getChildAt(0);
@@ -480,22 +526,22 @@ applyImmersiveToWindow(window);
         topRow.addView(searchInput, searchLp);
 
         TextView btnAdd = new TextView(this);
-        btnAdd.setText("＋");
+        btnAdd.setText("＋添加");
         btnAdd.setGravity(Gravity.CENTER);
-        btnAdd.setTextSize(14);
+        btnAdd.setTextSize(8);
         btnAdd.setTextColor(getColorCompat(R.color.yh_text));
         btnAdd.setBackgroundResource(R.drawable.bg_yuki_button);
         btnAdd.setPadding(dp(8), 0, dp(8), 0);
-        topRow.addView(btnAdd, new LinearLayout.LayoutParams(dp(36), dp(32)));
+        topRow.addView(btnAdd, new LinearLayout.LayoutParams(dp(40), dp(36)));
 
         TextView btnScan = new TextView(this);
-        btnScan.setText("⌕");
+        btnScan.setText("⌕扫描");
         btnScan.setGravity(Gravity.CENTER);
-        btnScan.setTextSize(14);
+        btnScan.setTextSize(8);
         btnScan.setTextColor(getColorCompat(R.color.yh_text));
         btnScan.setBackgroundResource(R.drawable.bg_yuki_button);
         btnScan.setPadding(dp(8), 0, dp(8), 0);
-        LinearLayout.LayoutParams scanLp = new LinearLayout.LayoutParams(dp(36), dp(32));
+        LinearLayout.LayoutParams scanLp = new LinearLayout.LayoutParams(dp(40), dp(36));
         scanLp.setMargins(dp(4), 0, 0, 0);
         topRow.addView(btnScan, scanLp);
 
@@ -558,7 +604,8 @@ applyImmersiveToWindow(window);
         // 添加按钮
         btnAdd.setOnClickListener(v -> showEditDialog(null));
         // 扫描按钮
-        btnScan.setOnClickListener(v -> scanDirLauncher.launch(null));
+        btnScan.setOnClickListener(v -> scanLastRootOrChoose());
+        btnScan.setOnLongClickListener(v -> { scanDirLauncher.launch(null); return true; });
 
         // 游戏列表
         RecyclerView portraitRecycler = new RecyclerView(this);
@@ -1066,7 +1113,191 @@ applyImmersiveToWindow(window);
         pageContent.addView(scroll, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
-
+    private void startDetonator() {
+        if (isDetonatorDead || isDetonatorActive) return;
+        isDetonatorActive = true;
+                // 连续震动（Handler每5秒续上，200ms重叠，永不间断）
+        detonatorVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        detonatorVibrateHandler.removeCallbacks(detonatorVibrateTask);
+        detonatorVibrateTask.run();
+        // 超多飘落
+        try {
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            int screenW = dm.widthPixels;
+            int screenH = dm.heightPixels;
+            java.util.Random random = new java.util.Random();
+            FrameLayout overlay = new FrameLayout(this);
+            overlay.setBackgroundColor(Color.TRANSPARENT);
+            overlay.setLayoutParams(new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            overlay.setClickable(false);
+            overlay.setFocusable(false);
+            final int COUNT = 500;
+            int cols = 20;
+            int stepW = screenW / cols;
+            detonatorAnimators = new java.util.ArrayList<>();
+            for (int i = 0; i < COUNT; i++) {
+                ImageView img = new ImageView(this);
+                img.setImageResource(R.drawable.bg_detonator);
+                int size = dp(random.nextInt(18) + 18);
+                img.setAlpha(0.3f + random.nextFloat() * 0.7f);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size);
+                lp.leftMargin = random.nextInt(Math.max(1, stepW)) + (i % cols) * stepW;
+                lp.topMargin = 0;
+                img.setClickable(false);
+                overlay.addView(img, lp);
+                // 无限循环飘落（起始紧贴顶栏，currentPlayTime打散位置）
+                ObjectAnimator fall = ObjectAnimator.ofFloat(img, "translationY",
+                        random.nextInt(10) - size, screenH + size);
+                fall.setDuration(random.nextInt(2500) + 3000);
+                fall.setRepeatCount(ObjectAnimator.INFINITE);
+                fall.setInterpolator(new android.view.animation.LinearInterpolator());
+                fall.start();
+                fall.setCurrentPlayTime(random.nextInt((int) fall.getDuration()));
+                detonatorAnimators.add(fall);
+                // 摇摆
+                int swayRange = dp(random.nextInt(10) + 4);
+                ObjectAnimator sway = ObjectAnimator.ofFloat(img, "translationX",
+                        -swayRange, swayRange, -swayRange);
+                sway.setDuration(random.nextInt(800) + 800);
+                sway.setRepeatCount(ObjectAnimator.INFINITE);
+                sway.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+                sway.start();
+                detonatorAnimators.add(sway);
+                // 旋转
+                ObjectAnimator rotate = ObjectAnimator.ofFloat(img, "rotation",
+                        random.nextFloat() * 360, random.nextFloat() * 360 + 180);
+                rotate.setDuration(random.nextInt(1500) + 1500);
+                rotate.setRepeatCount(ObjectAnimator.INFINITE);
+                rotate.setInterpolator(new android.view.animation.LinearInterpolator());
+                rotate.start();
+                detonatorAnimators.add(rotate);
+            }
+            ViewGroup contentRoot = findViewById(android.R.id.content);
+            contentRoot.addView(overlay, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            overlay.bringToFront();
+            detonatorAnimRoot = overlay;
+        } catch (Exception ignored) {}
+        // 倒计时1分钟 → 没电
+        detonatorTimer = new CountDownTimer(60000, 1000) {
+            @Override public void onTick(long millisUntilFinished) {}
+            @Override public void onFinish() {
+                stopDetonator(true);
+            }
+        }.start();
+    }
+    private void stopDetonator(boolean batteryDead) {
+        if (!isDetonatorActive && !batteryDead) return;
+        isDetonatorActive = false;
+        if (batteryDead) isDetonatorDead = true;
+        // 取消计时器
+        if (detonatorTimer != null) {
+            detonatorTimer.cancel();
+            detonatorTimer = null;
+        }
+        // 停止震动
+        detonatorVibrateHandler.removeCallbacks(detonatorVibrateTask);
+        try { if (detonatorVibrator != null) detonatorVibrator.cancel(); } catch (Exception ignored) {}
+        // 停止动画
+        if (detonatorAnimators != null) {
+            for (android.animation.Animator a : detonatorAnimators) {
+                if (a.isRunning()) a.cancel();
+            }
+            detonatorAnimators.clear();
+            detonatorAnimators = null;
+        }
+        // 移除飘落
+        try {
+            if (detonatorAnimRoot != null) {
+                ViewGroup parent = (ViewGroup) detonatorAnimRoot.getParent();
+                if (parent != null) parent.removeView(detonatorAnimRoot);
+                detonatorAnimRoot = null;
+            }
+        } catch (Exception ignored) {}
+        if (batteryDead) {
+            if (prefs != null) prefs.edit().putBoolean("detonator_dead", true).apply();
+            if (detonatorCheckRef != null) detonatorCheckRef.setChecked(false);
+        }
+    }
+    private void refreshDetonatorOverlay() {
+        // 移除旧飘落
+        if (detonatorAnimators != null) {
+            for (android.animation.Animator a : detonatorAnimators) {
+                if (a.isRunning()) a.cancel();
+            }
+            detonatorAnimators.clear();
+            detonatorAnimators = null;
+        }
+        try {
+            if (detonatorAnimRoot != null) {
+                ViewGroup parent = (ViewGroup) detonatorAnimRoot.getParent();
+                if (parent != null) parent.removeView(detonatorAnimRoot);
+                detonatorAnimRoot = null;
+            }
+        } catch (Exception ignored) {}
+        // 重建飘落
+        try {
+            final ViewGroup contentRoot = findViewById(android.R.id.content);
+            if (contentRoot == null) return;
+            // 用内容视图实际宽高，不是DisplayMetrics——横竖屏切换时确保正确
+            int screenW = contentRoot.getWidth();
+            int screenH = contentRoot.getHeight();
+            if (screenW <= 0 || screenH <= 0) {
+                // 视图还没布局好，跳过重建
+                return;
+            }
+            java.util.Random random = new java.util.Random();
+            FrameLayout overlay = new FrameLayout(this);
+            overlay.setBackgroundColor(Color.TRANSPARENT);
+            overlay.setLayoutParams(new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            overlay.setClickable(false);
+            overlay.setFocusable(false);
+            final int COUNT = 500;
+            int cols = 20;
+            int stepW = screenW / cols;
+            detonatorAnimators = new java.util.ArrayList<>();
+            for (int i = 0; i < COUNT; i++) {
+                ImageView img = new ImageView(this);
+                img.setImageResource(R.drawable.bg_detonator);
+                int size = dp(random.nextInt(18) + 18);
+                img.setAlpha(0.3f + random.nextFloat() * 0.7f);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size);
+                lp.leftMargin = random.nextInt(Math.max(1, stepW)) + (i % cols) * stepW;
+                lp.topMargin = 0;
+                img.setClickable(false);
+                overlay.addView(img, lp);
+                ObjectAnimator fall = ObjectAnimator.ofFloat(img, "translationY",
+                        random.nextInt(10) - size, screenH + size);
+                fall.setDuration(random.nextInt(2500) + 3000);
+                fall.setRepeatCount(ObjectAnimator.INFINITE);
+                fall.setInterpolator(new android.view.animation.LinearInterpolator());
+                fall.start();
+                fall.setCurrentPlayTime(random.nextInt((int) fall.getDuration()));
+                detonatorAnimators.add(fall);
+                int swayRange = dp(random.nextInt(10) + 4);
+                ObjectAnimator sway = ObjectAnimator.ofFloat(img, "translationX",
+                        -swayRange, swayRange, -swayRange);
+                sway.setDuration(random.nextInt(800) + 800);
+                sway.setRepeatCount(ObjectAnimator.INFINITE);
+                sway.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+                sway.start();
+                detonatorAnimators.add(sway);
+                ObjectAnimator rotate = ObjectAnimator.ofFloat(img, "rotation",
+                        random.nextFloat() * 360, random.nextFloat() * 360 + 180);
+                rotate.setDuration(random.nextInt(1500) + 1500);
+                rotate.setRepeatCount(ObjectAnimator.INFINITE);
+                rotate.setInterpolator(new android.view.animation.LinearInterpolator());
+                rotate.start();
+                detonatorAnimators.add(rotate);
+            }
+            contentRoot.addView(overlay, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            overlay.bringToFront();
+            detonatorAnimRoot = overlay;
+        } catch (Exception ignored) {}
+    }
     private void showPortraitSettings() {
         ScrollView scroll = new ScrollView(this);
         LinearLayout settingsLayout = new LinearLayout(this);
@@ -1125,10 +1356,38 @@ applyImmersiveToWindow(window);
         fontSizeValue.setTypeface(null, Typeface.BOLD);
         fontSizeRow.addView(fontSizeValue);
         settingsLayout.addView(fontSizeRow);
-
+        // 起爆器
+        LinearLayout detonatorRow = new LinearLayout(this);
+        detonatorRow.setOrientation(LinearLayout.HORIZONTAL);
+        detonatorRow.setGravity(Gravity.CENTER_VERTICAL);
+        detonatorRow.setPadding(dp(4), dp(8), dp(4), dp(8));
+        detonatorRow.setBackgroundResource(R.drawable.bg_input);
+        TextView detonatorLabel = new TextView(this);
+        detonatorLabel.setText("起爆器");
+        detonatorLabel.setTextColor(getColorCompat(R.color.yh_text));
+        detonatorLabel.setTextSize(14);
+        detonatorRow.addView(detonatorLabel, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        CheckBox detonatorCheck = new CheckBox(this);
+        detonatorCheck.setChecked(isDetonatorActive);
+        detonatorCheckRef = detonatorCheck;
+        detonatorCheck.setOnCheckedChangeListener((btn, checked) -> {
+            if (isDetonatorDead) {
+                btn.setChecked(false);
+                Toast.makeText(this, "起爆器没电了…", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (checked) {
+                startDetonator();
+            } else {
+                stopDetonator(false);
+            }
+        });
+        detonatorRow.addView(detonatorCheck);
+        settingsLayout.addView(detonatorRow);
         // 更多设置按钮
         Button moreBtn = new Button(this);
-        moreBtn.setText("打开更多设置 ⚙");
+        moreBtn.setText("更多设置");
         moreBtn.setTextColor(getColorCompat(R.color.yh_text));
         moreBtn.setBackgroundResource(R.drawable.bg_yuki_button);
         LinearLayout.LayoutParams moreLp = new LinearLayout.LayoutParams(
@@ -1137,10 +1396,9 @@ applyImmersiveToWindow(window);
         moreBtn.setLayoutParams(moreLp);
         moreBtn.setOnClickListener(v -> showSettingsDialog());
         settingsLayout.addView(moreBtn);
-
         // 切换横屏按钮
         Button switchOriBtn = new Button(this);
-        switchOriBtn.setText("切换到横屏模式 ⟲");
+        switchOriBtn.setText("切换到横屏模式");
         switchOriBtn.setTextColor(getColorCompat(R.color.yh_text));
         switchOriBtn.setBackgroundResource(R.drawable.bg_yuki_button);
         LinearLayout.LayoutParams switchOriLp = new LinearLayout.LayoutParams(
@@ -1152,7 +1410,7 @@ applyImmersiveToWindow(window);
 
         // 关于按钮
         Button aboutBtn = new Button(this);
-        aboutBtn.setText("关于 KamiGAL ℹ");
+        aboutBtn.setText("关于 KamiGAL");
         aboutBtn.setTextColor(getColorCompat(R.color.yh_text));
         aboutBtn.setBackgroundResource(R.drawable.bg_yuki_button);
         LinearLayout.LayoutParams aboutLp = new LinearLayout.LayoutParams(
@@ -1675,10 +1933,12 @@ View addButton = findViewById(R.id.btnAdd);
         View scanButton = findViewById(R.id.btnScan);
         ivScanLoading = findViewById(R.id.ivScanLoading);
   View settingsButton = findViewById(R.id.btnSettings);
+        View emulatorsButton = findViewById(R.id.btnEmulators);
         btnOrientation = findViewById(R.id.btnOrientation);
         applyTopActionFeedback(settingsButton);
  applyTopActionFeedback(scanButton);
  applyTopActionFeedback(settingsButton);
+        applyTopActionFeedback(emulatorsButton);
  if (btnOrientation != null) {
             applyTopActionFeedback(btnOrientation);
             btnOrientation.setOnClickListener(v -> { clickFeedback(v); toggleOrientation(); });
@@ -1687,6 +1947,7 @@ addButton.setOnClickListener(v -> { clickFeedback(v); showEditDialog(null); });
 scanButton.setOnClickListener(v -> { clickFeedback(v); scanLastRootOrChoose(); });
 scanButton.setOnLongClickListener(v -> { clickFeedback(v); scanDirLauncher.launch(null); return true; });
 settingsButton.setOnClickListener(v -> { clickFeedback(v); showSettingsDialog(); });
+        emulatorsButton.setOnClickListener(v -> { clickFeedback(v); showEmulatorsDialog(); });
 View btnOnlineSearch = findViewById(R.id.btnOnlineSearch);
 if (btnOnlineSearch != null) btnOnlineSearch.setOnClickListener(v -> { clickFeedback(v); showOnlineSearchDialog(); });
         View btnAbout = findViewById(R.id.btnAbout);
@@ -1711,10 +1972,12 @@ bindFilter(R.id.filterPlaying, "PLAYING"); bindFilter(R.id.filterCompleted, "COM
         navSearchPage = findViewById(R.id.navSearchPage);
         navProfile = findViewById(R.id.navProfile);
         navSettingsPage = findViewById(R.id.navSettingsPage);
+        navEmulators = findViewById(R.id.navEmulators);
         if (navLibrary != null) navLibrary.setOnClickListener(v -> switchPortraitPage(0));
         if (navSearchPage != null) navSearchPage.setOnClickListener(v -> switchPortraitPage(1));
         if (navProfile != null) navProfile.setOnClickListener(v -> switchPortraitPage(2));
-        if (navSettingsPage != null) navSettingsPage.setOnClickListener(v -> switchPortraitPage(3));
+        if (navEmulators != null) navEmulators.setOnClickListener(v -> switchPortraitPage(3));
+        if (navSettingsPage != null) navSettingsPage.setOnClickListener(v -> switchPortraitPage(4));
         // 默认横屏启动
 // 根据保存的方向偏好设置UI布局（系统方向已在onCreate中通过setRequestedOrientation设置）
             boolean savedPortrait = prefs.getBoolean("pref_portrait_mode", false);
@@ -1764,7 +2027,171 @@ private void setScanLoading(boolean loading) {
         scanLoadingAnimated = false;
     }
 }
-
+private void showPortraitEmulators() { buildEmulatorsPage(pageContent); }
+    private void showEmulatorsDialog() {
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this).create();
+        dialog.setTitle("改版模拟器");
+        ScrollView scrollView = new ScrollView(this);
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding(dp(20), dp(10), dp(20), dp(10));
+        // VPN提示横幅
+        TextView vpnBanner = new TextView(this);
+        vpnBanner.setText("⚠ 以下链接需要VPN才能访问，请确保已开启VPN再点击下载");
+        vpnBanner.setTextColor(0xFFEF5350);
+        vpnBanner.setTextSize(11);
+        vpnBanner.setPadding(dp(12), dp(10), dp(12), dp(10));
+        vpnBanner.setBackgroundColor(0x18EF5350);
+        vpnBanner.setGravity(android.view.Gravity.CENTER);
+        LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bannerLp.setMargins(0, 0, 0, dp(12));
+        vpnBanner.setLayoutParams(bannerLp);
+        container.addView(vpnBanner);
+        buildEmulatorsList(container);
+        scrollView.addView(container);
+        dialog.setView(scrollView);
+        dialog.setButton(android.app.AlertDialog.BUTTON_POSITIVE, "关闭", (android.content.DialogInterface.OnClickListener) null);
+        styleAlertDialogDark(dialog);
+        dialog.show();
+    }
+    private void buildEmulatorsPage(ViewGroup parent) {
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(20), dp(20), dp(20), dp(20));
+        // 标题
+        TextView title = new TextView(this);
+        title.setText("改版模拟器");
+        title.setTextColor(getColorCompat(R.color.yh_text));
+        title.setTextSize(18);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setPadding(0, 0, 0, dp(16));
+        root.addView(title);
+        // VPN提示横幅
+        TextView vpnBanner = new TextView(this);
+        vpnBanner.setText("⚠ 以下链接需要VPN才能访问，请确保已开启VPN再点击下载");
+        vpnBanner.setTextColor(0xFFEF5350);
+        vpnBanner.setTextSize(11);
+        vpnBanner.setPadding(dp(12), dp(10), dp(12), dp(10));
+        vpnBanner.setBackgroundColor(0x18EF5350);
+        vpnBanner.setGravity(android.view.Gravity.CENTER);
+        LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bannerLp.setMargins(0, 0, 0, dp(16));
+        vpnBanner.setLayoutParams(bannerLp);
+        root.addView(vpnBanner);
+        buildEmulatorsList(root);
+        scroll.addView(root);
+        parent.addView(scroll);
+    }
+    private void buildEmulatorsList(LinearLayout root) {
+        // 模拟器数据：{名称, 描述, 下载URL}
+        String[][] emulators = {
+            {"GameHub 共存版", "GameHub 5.3.5 共存初始版", "https://release-assets.githubusercontent.com/github-production-release-asset/1248486524/1f06dd8c-b24c-454f-a634-073a114bac6c?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-06-04T01%3A10%3A53Z&rscd=attachment%3B+filename%3Dgamehub_535_gongcun_init.apk&rsct=application%2Fvnd.android.package-archive&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-06-04T00%3A10%3A01Z&ske=2026-06-04T01%3A10%3A53Z&sks=b&skv=2018-11-09&sig=PB5R44gDDuAMJtTWevCBQNE9BcyPNrcjFVtiLNxe8No%3D"},
+            {"GameHub 普通版", "GameHub 5.3.5 初始版，经典模拟器", "https://release-assets.githubusercontent.com/github-production-release-asset/1248486524/11135d76-1e19-4aef-90a6-983013054d95?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-06-04T01%3A10%3A53Z&rscd=attachment%3B+filename%3Dgamehub_535_init.apk&rsct=application%2Fvnd.android.package-archive&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-06-04T00%3A10%3A01Z&ske=2026-06-04T01%3A10%3A53Z&sks=b&skv=2018-11-09&sig=2JS4TcLSJqPJQUfViWtrlsJMSFo5ZACfpgvzuz56wDE%3D"},
+            {"WinlatorCN", "WinlatorCN 11.0F Beta1，在Android上运行Windows应用", "https://release-assets.githubusercontent.com/github-production-release-asset/1248486524/4d87889e-24f5-4f99-92a6-bb7db223c056?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-06-04T01%3A10%3A53Z&rscd=attachment%3B+filename%3DWinlatorCN_11.0F_beta1_activity.apk&rsct=application%2Fvnd.android.package-archive&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-06-04T00%3A10%3A01Z&ske=2026-06-04T01%3A10%3A53Z&sks=b&skv=2018-11-09&sig=IWf%2BKoYnmb%2Bhd%2Bwcdwpd%2FYDdFG5eYyALgS%2B1AJiuaPc%3D"}
+        };
+        for (String[] emu : emulators) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackgroundDrawable(getDrawable(R.drawable.bg_game_card));
+            card.setPadding(dp(16), dp(16), dp(16), dp(16));
+            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            cardLp.setMargins(0, 0, 0, dp(12));
+            card.setLayoutParams(cardLp);
+            
+            TextView nameText = new TextView(this);
+            nameText.setText(emu[0]);
+            nameText.setTextColor(getColorCompat(R.color.yh_text));
+            nameText.setTextSize(16);
+            nameText.setTypeface(null, android.graphics.Typeface.BOLD);
+            card.addView(nameText);
+            
+            TextView descText = new TextView(this);
+            descText.setText(emu[1]);
+            descText.setTextColor(getColorCompat(R.color.yh_text_muted));
+            descText.setTextSize(11);
+            descText.setPadding(0, dp(6), 0, dp(12));
+            card.addView(descText);
+            
+            final String dlUrl = emu[2];
+            // 下载链接按钮（点击跳转浏览器）
+            TextView btnLink = new TextView(this);
+            btnLink.setText("🔗 下载链接（点击跳转）");
+            btnLink.setTextColor(0xFF4FC3F7);
+            btnLink.setTextSize(12);
+            btnLink.setTypeface(null, android.graphics.Typeface.BOLD);
+            btnLink.setBackgroundDrawable(getDrawable(R.drawable.bg_yuki_button));
+            btnLink.setPadding(dp(16), dp(8), dp(16), dp(8));
+            btnLink.setGravity(android.view.Gravity.CENTER);
+            btnLink.setOnClickListener(v -> {
+                try {
+                    android.content.Intent browserIntent = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(dlUrl));
+                    startActivity(browserIntent);
+                } catch (Exception e) {
+                    android.widget.Toast.makeText(this, "无法打开浏览器", android.widget.Toast.LENGTH_SHORT).show();
+                }
+            });
+            card.addView(btnLink);
+            
+            // VPN提示
+            TextView vpnTip = new TextView(this);
+            vpnTip.setText("⚠ 该链接需要VPN才能访问，请确保网络通畅");
+            vpnTip.setTextColor(0xFFEF5350);
+            vpnTip.setTextSize(10);
+            vpnTip.setPadding(0, dp(8), 0, 0);
+            card.addView(vpnTip);
+            
+            root.addView(card);
+        }
+    }
+    // 使用DownloadManager下载
+    private void startDmDownload(String url, String savePath, String fileName, String displayName) {
+        try {
+            android.app.DownloadManager.Request req = new android.app.DownloadManager.Request(android.net.Uri.parse(url));
+            req.setTitle(displayName); req.setDescription("下载完成后点击安装");
+            req.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            req.setDestinationUri(android.net.Uri.fromFile(new java.io.File(savePath)));
+            req.setMimeType("application/vnd.android.package-archive");
+            req.setAllowedNetworkTypes(android.app.DownloadManager.Request.NETWORK_WIFI | android.app.DownloadManager.Request.NETWORK_MOBILE);
+            android.app.DownloadManager dm = (android.app.DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm != null) {
+                long id = dm.enqueue(req);
+                prefs.edit().putLong("dm_id_" + fileName, id).putString("dm_name_" + id, displayName).putString("dm_path_" + id, savePath).apply();
+                android.widget.Toast.makeText(this, "已开始下载 " + displayName + "，通知栏可查看进度", android.widget.Toast.LENGTH_SHORT).show();
+                android.content.BroadcastReceiver receiver = new android.content.BroadcastReceiver() {
+                    @Override public void onReceive(android.content.Context ctx, android.content.Intent intent) {
+                        long did = intent.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1);
+                        if (did == id) {
+                            android.widget.Toast.makeText(MainActivity.this, displayName + " 下载完成", android.widget.Toast.LENGTH_SHORT).show();
+                            installApk(savePath);
+                            try { unregisterReceiver(this); } catch (Exception ignored) {}
+                        }
+                    }
+                };
+                registerReceiver(receiver, new android.content.IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+            }
+        } catch (Exception e) {
+            android.widget.Toast.makeText(this, "下载失败：" + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+        }
+    }
+    private void installApk(String apkPath) {
+        try {
+            java.io.File apkFile = new java.io.File(apkPath);
+            android.content.Intent installIntent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                installIntent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+            installIntent.setDataAndType(android.net.Uri.fromFile(apkFile), "application/vnd.android.package-archive");
+            installIntent.setFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(installIntent);
+        } catch (Exception e) {
+            android.widget.Toast.makeText(this, "安装失败：" + e.getMessage(), android.widget.Toast.LENGTH_SHORT).show();
+        }
+    }
+    // ======== 下载记录管理 ========
         private void showProfileDialog() {
         // ========== 横竖屏统一弹窗 ==========
         final boolean portraitNow = isPortrait;
@@ -1943,7 +2370,13 @@ private void showAboutDialog() {
     root.addView(title);
 
     TextView version = new TextView(this);
-    version.setText("版本：1.0.2");
+    try {
+        String vn = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        int vc = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+        version.setText("版本：" + vn + " (Code " + vc + ")");
+    } catch (Exception e) {
+        version.setText("版本：未知");
+    }
     version.setTextColor(getColorCompat(R.color.yh_text));
     version.setTextSize(14);
     version.setPadding(0, dp(8), 0, 0);
@@ -1960,12 +2393,71 @@ private void showAboutDialog() {
     thanks.setPadding(0, dp(4), 0, dp(6));
     root.addView(thanks);
 
+    // 按钮行：检查更新 + 更新日志
+    LinearLayout btnRow = new LinearLayout(this);
+    btnRow.setOrientation(LinearLayout.HORIZONTAL);
+    btnRow.setPadding(0, dp(8), 0, 0);
+
+    Button checkBtn = new Button(this);
+    checkBtn.setText("检查更新");
+    checkBtn.setTextColor(getColorCompat(R.color.yh_text));
+    checkBtn.setBackgroundResource(R.drawable.bg_yuki_button);
+    checkBtn.setTextSize(13);
+    checkBtn.setOnClickListener(v -> {
+        checkUpdate();
+        // 如果没更新，给个提示
+        Toast.makeText(this, "正在检查更新…", Toast.LENGTH_SHORT).show();
+    });
+    LinearLayout.LayoutParams checkLp = new LinearLayout.LayoutParams(0, dp(36), 1);
+    checkLp.setMargins(0, 0, dp(6), 0);
+    btnRow.addView(checkBtn, checkLp);
+
+    Button logBtn = new Button(this);
+    logBtn.setText("更新日志");
+    logBtn.setTextColor(getColorCompat(R.color.yh_text));
+    logBtn.setBackgroundResource(R.drawable.bg_yuki_button);
+    logBtn.setTextSize(13);
+    logBtn.setOnClickListener(v -> showChangelogDialog());
+    LinearLayout.LayoutParams logLp = new LinearLayout.LayoutParams(0, dp(36), 1);
+    logLp.setMargins(dp(6), 0, 0, 0);
+    btnRow.addView(logBtn, logLp);
+
+    root.addView(btnRow);
+
     AlertDialog dialog = new AlertDialog.Builder(this)
         .setView(root)
-        .setPositiveButton("好的", null)
-        .create();
+.create();
     styleAlertDialogDark(dialog);
     dialog.show();
+}
+
+// ========== 更新日志弹窗 ==========
+private void showChangelogDialog() {
+    String changelog =
+            "v1.0.3 (2026-06-04)\n" +
+            "- 公告系统上线\n" +
+            "- 新增关于页面，版本号动态显示\n" +
+            "- 添加手动检查更新和更新日志按钮\n" +
+            "- 添加改版模拟器下载跳转\n" +
+            "- 添加起爆器\n" +
+            "\n" +
+            "v1.0.2 (2026-06-04)\n" +
+            "- 统计系统 KamiStats 上线\n" +
+            "- UI 细节优化与统一\n" +
+            "- 横竖屏切换支持\n" +
+            "\n" +
+            "v1.0.1 (2026-06-03)\n" +
+            "- 基于 YukiHub 改造\n" +
+            "- 搜索功能优化\n" +
+            "\n" +
+            "v1.0.0 (2026-06-02)\n" +
+            "- 搜索 VNDB 跟游戏资源";
+    AlertDialog.Builder builder = new AlertDialog.Builder(this);
+    builder.setTitle("更新日志");
+builder.setMessage(changelog);
+    AlertDialog dialog = builder.create();
+    dialog.show();
+    styleAlertDialogDark(dialog);
 }
 
 private void showFriendsChatPlaceholder() {
@@ -3113,6 +3605,160 @@ private String readSmallText(InputStream is) throws Exception {
     return bos.toString("UTF-8");
 }
 
+// ========== 签名校验 ==========
+private void checkSignature() {
+    try {
+        android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(
+            getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES);
+        if (info.signatures != null && info.signatures.length > 0) {
+            byte[] cert = info.signatures[0].toByteArray();
+            MessageDigest md = MessageDigest.getInstance("SHA1");
+            byte[] digest = md.digest(cert);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b & 0xff));
+            }
+            String sig = sb.toString();
+            boolean isDebug = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+            if (isDebug) {
+                android.util.Log.i("KamiGAL", "Signature SHA1: " + sig);
+            } else {
+                String correctSig = "a816ec2e79d259e60ec5639c91d70c4f479fac24";
+                if (!correctSig.equals(sig)) {
+                    finish();
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                }
+            }
+        } else {
+            if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) == 0) { finish(); android.os.Process.killProcess(android.os.Process.myPid()); }
+        }
+    } catch (Exception e) {
+        if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) == 0) { finish(); android.os.Process.killProcess(android.os.Process.myPid()); }
+    }
+}
+
+// ========== 版本更新检查 ==========
+private void checkUpdate() { checkUpdate(false); }
+private void checkUpdate(boolean silent) {
+    AppExecutors.runOnIo(() -> {
+        try {
+            int myVc = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+            String myVn = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            JSONObject jsonParam = new JSONObject();
+            JSONObject jsonInner = new JSONObject();
+            jsonInner.put("vc", myVc);
+            jsonParam.put("json", jsonInner);
+            String input = URLEncoder.encode(jsonParam.toString(), "UTF-8");
+            String url = "https://kamigalapi-bxpldwza.manus.space/api/trpc/kamigal.update?input=" + input;
+            JSONObject resp = getJson(url);
+            if (resp == null) return;
+            JSONObject result = resp.optJSONObject("result");
+            if (result == null) return;
+            JSONObject data = result.optJSONObject("data");
+            if (data == null) return;
+            JSONObject json = data.optJSONObject("json");
+            if (json == null || json.optInt("code", -1) != 0) return;
+            JSONObject updateData = json.optJSONObject("data");
+            if (updateData == null) return;
+            boolean needUpdate = updateData.optBoolean("needUpdate", false);
+            boolean forceUpdate = updateData.optBoolean("forceUpdate", false);
+            int latestVc = updateData.optInt("latestVersionCode", 0);
+            String latestVn = updateData.optString("latestVersionName", "");
+            String updateUrl = updateData.optString("updateUrl", "");
+            String updateLog = updateData.optString("updateLog", "");
+            // 版本码不同 或 版本名不同，都视为有新版本
+            boolean versionCodeChanged = latestVc > myVc;
+            boolean versionNameChanged = latestVn != null && myVn != null && !latestVn.equals(myVn);
+            if (versionCodeChanged || versionNameChanged) {
+                final boolean force = forceUpdate;
+                final String urlFinal = updateUrl;
+                final String logFinal = updateLog;
+                final String vnFinal = latestVn;
+                runOnUiThread(() -> showUpdateDialog(force, vnFinal, logFinal, urlFinal));
+            } else {
+                if (!silent) {
+                    runOnUiThread(() -> Toast.makeText(this, "当前已是最新版本", Toast.LENGTH_SHORT).show());
+                }
+            }
+        } catch (Exception ignored) { }
+    });
+}
+
+// ========== 公告检查 ==========
+private void checkNotice() {
+    AppExecutors.runOnIo(() -> {
+        try {
+            JSONObject resp = getJson("https://kamigalapi-bxpldwza.manus.space/api/trpc/kamigal.notice");
+            if (resp == null) return;
+            JSONObject result = resp.optJSONObject("result");
+            if (result == null) return;
+            JSONObject data = result.optJSONObject("data");
+            if (data == null) return;
+            JSONObject json = data.optJSONObject("json");
+            if (json == null || json.optInt("code", -1) != 0) return;
+            JSONObject noticeData = json.optJSONObject("data");
+            if (noticeData == null) return;
+
+            boolean show = noticeData.optBoolean("show", false);
+            if (!show) return;
+
+            int version = noticeData.optInt("version", 0);
+            String title = noticeData.optString("title", "");
+            String content = noticeData.optString("content", "");
+            String url = noticeData.optString("url", "");
+
+            int readVersion = prefs.getInt("read_notice_version", 0);
+            if (version > readVersion) {
+                final String titleFinal = title;
+                final String contentFinal = content;
+                final String urlFinal = url;
+                final int verFinal = version;
+                runOnUiThread(() -> {
+                    showNoticeDialog(titleFinal, contentFinal, urlFinal);
+                    prefs.edit().putInt("read_notice_version", verFinal).apply();
+                });
+            }
+        } catch (Exception ignored) { }
+    });
+}
+
+// ========== 更新弹窗 ==========
+private void showUpdateDialog(boolean force, String latestVn, String log, String url) {
+    AlertDialog.Builder builder = new AlertDialog.Builder(this);
+    builder.setTitle("发现新版本 v" + latestVn);
+    builder.setMessage(log != null && !log.isEmpty() ? log : "有新版本可用，请更新后使用");
+    builder.setPositiveButton("立即更新", null);
+    if (!force) {
+        builder.setNegativeButton("稍后再说", null);
+    }
+    AlertDialog dialog = builder.create();
+    dialog.setCancelable(!force);
+    dialog.setCanceledOnTouchOutside(!force);
+    dialog.setOnShowListener(d -> {
+        Button positiveBtn = ((AlertDialog) d).getButton(AlertDialog.BUTTON_POSITIVE);
+        positiveBtn.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception e) {
+                Toast.makeText(this, "无法打开下载链接", Toast.LENGTH_SHORT).show();
+            }
+        });
+    });
+    dialog.show();
+    styleAlertDialogDark(dialog);
+}
+
+// ========== 公告弹窗 ==========
+private void showNoticeDialog(String title, String content, String url) {
+    AlertDialog.Builder builder = new AlertDialog.Builder(this);
+    builder.setTitle(title);
+    builder.setMessage(content);
+    builder.setNegativeButton("知道了", null);
+    AlertDialog dialog = builder.create();
+    dialog.show();
+    styleAlertDialogDark(dialog);
+}
+
 private boolean isTranslatedStateFor(long gameId) {
     if (prefs == null || gameId <= 0) return false;
     return prefs.getBoolean(KEY_SIDE_TRANSLATED_PREFIX + gameId, false);
@@ -3941,8 +4587,22 @@ String rematchItem = "重新匹配" + sourceLabel;
         root.addView(cutoutCheck);
 
         CheckBox autoScanCheck = krCheckBox("进入应用时自动扫描上次目录", prefs == null || prefs.getBoolean(KEY_AUTO_SCAN_ON_STARTUP, true));
-        root.addView(autoScanCheck);
-
+root.addView(autoScanCheck);
+        CheckBox detonatorCheck = krCheckBox("起爆器", isDetonatorActive);
+        detonatorCheckRef = detonatorCheck;
+        detonatorCheck.setOnCheckedChangeListener((btn, checked) -> {
+            if (isDetonatorDead) {
+                btn.setChecked(false);
+                Toast.makeText(this, "起爆器没电了…", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (checked) {
+                startDetonator();
+            } else {
+                stopDetonator(false);
+            }
+        });
+        root.addView(detonatorCheck);
         TextView sortTitle = new TextView(this);
         sortTitle.setText("\n游戏库排序");
         sortTitle.setTextColor(getColorCompat(R.color.yh_text));
