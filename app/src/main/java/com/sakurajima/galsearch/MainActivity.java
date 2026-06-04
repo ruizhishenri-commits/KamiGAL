@@ -287,6 +287,7 @@ private ActivityResultLauncher<String[]> backupOpenLauncher;
     private Runnable statsPollTask;
     private TextView statsOvOnline;
     private TextView statsOvToday;
+    private TextView statsOvTotal;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -1011,12 +1012,15 @@ pageContent.removeAllViews();
         onlineRow.setLayoutParams(onlineRowLp);
         final TextView ovOnline = profileStatCard("在线", "...");
         final TextView ovToday = profileStatCard("今日使用", "...");
+        final TextView ovTotal = profileStatCard("总用户", "...");
         statsOvOnline = ovOnline;
         statsOvToday = ovToday;
+        statsOvTotal = ovTotal;
         LinearLayout.LayoutParams ovMid = new LinearLayout.LayoutParams(0, dp(48), 1);
         ovMid.setMargins(dp(6), 0, dp(6), 0);
         onlineRow.addView(ovOnline, new LinearLayout.LayoutParams(0, dp(48), 1));
         onlineRow.addView(ovToday, ovMid);
+        onlineRow.addView(ovTotal, new LinearLayout.LayoutParams(0, dp(48), 1));
         profileLayout.addView(onlineRow);
         AppExecutors.runOnIo(() -> {
             try {
@@ -1038,9 +1042,11 @@ pageContent.removeAllViews();
                     if (data != null) data = data.optJSONObject("json");
                     final String onlineStr = String.valueOf(data != null ? data.optInt("onlineNow", 0) : 0);
                     final String todayStr = String.valueOf(data != null ? data.optInt("todayLaunches", 0) : 0);
+                    final String totalStr = String.valueOf(data != null ? data.optInt("totalUsers", 0) : 0);
                     runOnUiThread(() -> {
                         ovOnline.setText("在线\n" + onlineStr);
                         ovToday.setText("今日使用\n" + todayStr);
+                        ovTotal.setText("总用户\n" + totalStr);
                     });
                 }
             } catch (Throwable ignored) {}
@@ -2267,19 +2273,22 @@ private void showPortraitEmulators() { buildEmulatorsPage(pageContent); }
     statCards.addView(profileStatCard("今日", TimeFormatUtil.playTime(todayTotalPlayTime())), new LinearLayout.LayoutParams(0, dp(48), 1));
     root.addView(statCards);
 
-    // 在线数据行
-    LinearLayout onlineRow = new LinearLayout(this);
-    onlineRow.setOrientation(LinearLayout.HORIZONTAL);
-    onlineRow.setPadding(0, 0, 0, dp(4));
-    final TextView ovOnline = profileStatCard("在线", "...");
-    final TextView ovToday = profileStatCard("今日使用", "...");
-    statsOvOnline = ovOnline;
-    statsOvToday = ovToday;
-    LinearLayout.LayoutParams ovMid = new LinearLayout.LayoutParams(0, dp(48), 1);
-    ovMid.setMargins(dp(6), 0, dp(6), 0);
-    onlineRow.addView(ovOnline, new LinearLayout.LayoutParams(0, dp(48), 1));
-    onlineRow.addView(ovToday, ovMid);
-    root.addView(onlineRow);
+// 在线数据行
+        LinearLayout onlineRow = new LinearLayout(this);
+        onlineRow.setOrientation(LinearLayout.HORIZONTAL);
+        onlineRow.setPadding(0, 0, 0, dp(4));
+        final TextView ovOnline = profileStatCard("在线", "...");
+        final TextView ovToday = profileStatCard("今日使用", "...");
+        final TextView ovTotal = profileStatCard("总用户", "...");
+        statsOvOnline = ovOnline;
+        statsOvToday = ovToday;
+        statsOvTotal = ovTotal;
+        LinearLayout.LayoutParams ovMid = new LinearLayout.LayoutParams(0, dp(48), 1);
+        ovMid.setMargins(dp(6), 0, dp(6), 0);
+        onlineRow.addView(ovOnline, new LinearLayout.LayoutParams(0, dp(48), 1));
+        onlineRow.addView(ovToday, ovMid);
+        onlineRow.addView(ovTotal, new LinearLayout.LayoutParams(0, dp(48), 1));
+        root.addView(onlineRow);
 
     TextView nameLabel = profileLabel("昵称");
     root.addView(nameLabel);
@@ -2447,6 +2456,10 @@ private void showAboutDialog() {
 // ========== 更新日志弹窗 ==========
 private void showChangelogDialog() {
     String changelog =
+            "v1.0.4 (2026-06-05)\n" +
+            "- 添加识图功能，支持识别Galgame、动漫、二游角色\n" +
+            "- 统计页面添加总用户数显示\n" +
+            "\n" +
             "v1.0.3 (2026-06-04)\n" +
             "- 公告系统上线\n" +
             "- 新增关于页面，版本号动态显示\n" +
@@ -7718,7 +7731,7 @@ return startActivitySafely(EmulatorLauncher.buildInternalKrkrIntent(this, game.r
             public void run() {
                 sendStatsRequest("/api/trpc/stats.heartbeat");
                 if (statsHandler != null) {
-                    statsHandler.postDelayed(this, 60 * 1000);
+                    statsHandler.postDelayed(this, 30 * 1000);
                 }
             }
         };
@@ -7793,9 +7806,11 @@ private void startStatsPolling() {
                     if (data != null) data = data.optJSONObject("json");
                     final String onlineStr = String.valueOf(data != null ? data.optInt("onlineNow", 0) : 0);
                     final String todayStr = String.valueOf(data != null ? data.optInt("todayLaunches", 0) : 0);
+                    final String totalStr = String.valueOf(data != null ? data.optInt("totalUsers", 0) : 0);
                     runOnUiThread(() -> {
                         if (statsOvOnline != null) statsOvOnline.setText("在线\n" + onlineStr);
                         if (statsOvToday != null) statsOvToday.setText("今日使用\n" + todayStr);
+                        if (statsOvTotal != null) statsOvTotal.setText("总用户\n" + totalStr);
                     });
                 }
             } catch (Throwable ignored) {}
@@ -7842,7 +7857,7 @@ private void pauseBackgroundVideoIfNeeded() {
         pickBtn.setLayoutParams(new LinearLayout.LayoutParams(0, dp(44), 1));
         pickBtn.setGravity(android.view.Gravity.CENTER);
         pickBtn.setBackgroundDrawable(getDrawable(R.drawable.bg_yuki_button));
-        pickBtn.setText("🖼 选择图片");
+        pickBtn.setText("选择图片");
         pickBtn.setTextColor(0xFF071221);
         pickBtn.setTextSize(14);
         pickBtn.setTypeface(null, android.graphics.Typeface.BOLD);
@@ -7919,7 +7934,7 @@ private void pauseBackgroundVideoIfNeeded() {
 
     private void showImageSearchDialog() {
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this).create();
-        dialog.setTitle("📷 识图识别Galgame");
+        dialog.setTitle("识图识别Galgame");
         ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -7977,7 +7992,7 @@ private void pauseBackgroundVideoIfNeeded() {
         pickBtn.setLayoutParams(new LinearLayout.LayoutParams(0, dp(36), 1));
         pickBtn.setGravity(android.view.Gravity.CENTER);
         pickBtn.setBackgroundDrawable(getDrawable(R.drawable.bg_yuki_button));
-        pickBtn.setText("🖼 选择图片");
+        pickBtn.setText("选择图片");
         pickBtn.setTextColor(0xFF071221);
         pickBtn.setTextSize(12);
         pickBtn.setTypeface(null, android.graphics.Typeface.BOLD);
@@ -8186,7 +8201,7 @@ private void pauseBackgroundVideoIfNeeded() {
 
                     if (work != null) {
                         TextView tvWork = new TextView(this);
-                        tvWork.setText("🎮 " + work);
+                        tvWork.setText(work);
                         tvWork.setTextColor(getColorCompat(R.color.yh_text));
                         tvWork.setTextSize(16);
                         tvWork.setTypeface(null, android.graphics.Typeface.BOLD);
