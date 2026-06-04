@@ -7940,81 +7940,49 @@ private void pauseBackgroundVideoIfNeeded() {
                 bitmap = scaled;
             }
 
-            // 将压缩后的图片保存到缓存文件
-            java.io.File cacheDir = getCacheDir();
-            java.io.File tmpFile = new java.io.File(cacheDir, "imgsearch_temp.jpg");
-            java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpFile);
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, fos);
-            fos.close();
+            // 转成JPEG Base64
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, baos);
             bitmap.recycle();
+            byte[] imageBytes = baos.toByteArray();
+            String base64 = android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP);
 
-            // 更新预览
             runOnUiThread(() -> showToast("正在识别中，请稍候…"));
 
-            // 调用API（使用multipart上传文件）
+            // 调用API（用base64参数，URLEncoder编码）
             new Thread(() -> {
                 try {
-                    String result = callAnimeTraceApiWithFile(tmpFile);
+                    String result = callAnimeTraceApiWithBase64(base64);
                     runOnUiThread(() -> showImageSearchResult(result, imageUri));
-                    tmpFile.delete();
                 } catch (Exception e) {
-                    runOnUiThread(() -> showToast("识别失败: " + e.getMessage()));
-                    tmpFile.delete();
+                    runOnUiThread(() -> showToast("识别失败: " + e.toString()));
                 }
             }).start();
 
         } catch (Exception e) {
-            showToast("图片处理失败: " + e.getMessage());
+            showToast("图片处理失败: " + e.toString());
         }
     }
 
-    private String callAnimeTraceApiWithFile(java.io.File imageFile) throws Exception {
-        String boundary = "----KamiGAL" + System.currentTimeMillis();
-        String lineEnd = "\r\n";
+    private String callAnimeTraceApiWithBase64(String base64Image) throws Exception {
         java.net.URL url = new java.net.URL("https://api.animetrace.com/v1/search");
         java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
-        conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
         conn.setDoOutput(true);
-        conn.setDoInput(true);
         conn.setConnectTimeout(30000);
         conn.setReadTimeout(120000);
         conn.setUseCaches(false);
 
-        java.io.DataOutputStream dos = new java.io.DataOutputStream(conn.getOutputStream());
+        StringBuilder body = new StringBuilder();
+        body.append("base64=").append(java.net.URLEncoder.encode(base64Image, "UTF-8"));
+        body.append("&model=").append(java.net.URLEncoder.encode("animetrace_high_beta", "UTF-8"));
+        body.append("&is_multi=1");
 
-        // 文件字段
-        dos.writeBytes("--" + boundary + lineEnd);
-        dos.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"image.jpg\"" + lineEnd);
-        dos.writeBytes("Content-Type: image/jpeg" + lineEnd);
-        dos.writeBytes(lineEnd);
-
-        // 写入文件数据
-        java.io.FileInputStream fis = new java.io.FileInputStream(imageFile);
-        byte[] buffer = new byte[8192];
-        int read;
-        while ((read = fis.read(buffer)) != -1) {
-            dos.write(buffer, 0, read);
-        }
-        fis.close();
-        dos.writeBytes(lineEnd);
-
-        // model字段
-        dos.writeBytes("--" + boundary + lineEnd);
-        dos.writeBytes("Content-Disposition: form-data; name=\"model\"" + lineEnd);
-        dos.writeBytes(lineEnd);
-        dos.writeBytes("animetrace_high_beta" + lineEnd);
-
-        // is_multi字段
-        dos.writeBytes("--" + boundary + lineEnd);
-        dos.writeBytes("Content-Disposition: form-data; name=\"is_multi\"" + lineEnd);
-        dos.writeBytes(lineEnd);
-        dos.writeBytes("1" + lineEnd);
-
-        // 结束boundary
-        dos.writeBytes("--" + boundary + "--" + lineEnd);
-        dos.flush();
-        dos.close();
+        java.io.OutputStream os = conn.getOutputStream();
+        os.write(body.toString().getBytes("UTF-8"));
+        os.flush();
+        os.close();
 
         int httpCode = conn.getResponseCode();
         java.io.InputStream is = (httpCode == 200) ? conn.getInputStream() : conn.getErrorStream();
