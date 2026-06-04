@@ -221,6 +221,9 @@ private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
     private View[] portraitPages = new View[6];
     private SharedPreferences prefs;
     private int imgSearchPreviewId = -1;
+    private int imgSearchResultAreaId = -1;
+    private int imgSearchStatusId = -1;
+    private int imgSearchScrollId = -1;
     private View imgSearchDialogRoot = null;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
@@ -7883,14 +7886,22 @@ private void pauseBackgroundVideoIfNeeded() {
         statusText.setTextColor(getColorCompat(R.color.yh_text_muted));
         statusText.setTextSize(12);
         statusText.setPadding(dp(4), dp(10), dp(4), dp(4));
+        int statusId = View.generateViewId();
+        imgSearchStatusId = statusId;
+        statusText.setId(statusId);
         root.addView(statusText);
 
         // 结果容器（ScrollView）
         ScrollView resultScroll = new ScrollView(this);
         resultScroll.setVisibility(View.GONE);
+        int scrollId = View.generateViewId();
+        imgSearchScrollId = scrollId;
+        resultScroll.setId(scrollId);
         LinearLayout resultArea = new LinearLayout(this);
         resultArea.setOrientation(LinearLayout.VERTICAL);
-        resultArea.setId(View.generateViewId());
+        int areaId = View.generateViewId();
+        imgSearchResultAreaId = areaId;
+        resultArea.setId(areaId);
         resultScroll.addView(resultArea, new ScrollView.LayoutParams(-1, -2));
         root.addView(resultScroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
@@ -8141,14 +8152,8 @@ private void pauseBackgroundVideoIfNeeded() {
                 return;
             }
 
-            // 弹结果对话框
-            android.app.AlertDialog resultDialog = new android.app.AlertDialog.Builder(this).create();
-            resultDialog.setTitle("🎯 识别结果");
-            ScrollView scroll = new ScrollView(this);
-            LinearLayout root = new LinearLayout(this);
-            root.setOrientation(LinearLayout.VERTICAL);
-            root.setPadding(dp(12), dp(12), dp(12), dp(12));
-
+            // 构建结果卡片列表
+            java.util.List<LinearLayout> cards = new java.util.ArrayList<>();
             for (int i = 0; i < data.size(); i++) {
                 com.google.gson.JsonElement elem = data.get(i);
                 if (elem == null || !elem.isJsonObject()) continue;
@@ -8207,9 +8212,7 @@ private void pauseBackgroundVideoIfNeeded() {
                     copyRow.setOrientation(LinearLayout.HORIZONTAL);
                     copyRow.setPadding(0, dp(8), 0, 0);
 
-                    if (copyWork.isEmpty() && copyChar.isEmpty()) {
-                        // 都不复制
-                    } else {
+                    if (!copyWork.isEmpty() || !copyChar.isEmpty()) {
                         if (!copyWork.isEmpty()) {
                             TextView copyWorkBtn = new TextView(this);
                             copyWorkBtn.setText("📋 作品名");
@@ -8250,19 +8253,47 @@ private void pauseBackgroundVideoIfNeeded() {
                     }
 
                     card.addView(copyRow);
-
-                    root.addView(card);
+                    cards.add(card);
                 }
             }
 
-            scroll.addView(root);
-            resultDialog.setView(scroll);
-            resultDialog.setButton(android.app.AlertDialog.BUTTON_NEGATIVE, "关闭", (d, w) -> d.dismiss());
-            resultDialog.show();
-            styleAlertDialogDark(resultDialog);
+            if (cards.isEmpty()) {
+                showToast("未识别到游戏信息，换张清晰点的截图试试～");
+                return;
+            }
 
-            // 也更新预览
+            // 更新预览
             updateImagePreview(imageUri);
+
+            if (isSearchDialogShowing) {
+                // 横屏对话框模式 → 弹 AlertDialog
+                android.app.AlertDialog resultDialog = new android.app.AlertDialog.Builder(this).create();
+                resultDialog.setTitle("🎯 识别结果");
+                ScrollView scroll = new ScrollView(this);
+                LinearLayout root = new LinearLayout(this);
+                root.setOrientation(LinearLayout.VERTICAL);
+                root.setPadding(dp(12), dp(12), dp(12), dp(12));
+                for (LinearLayout card : cards) root.addView(card);
+                scroll.addView(root);
+                resultDialog.setView(scroll);
+                resultDialog.setButton(android.app.AlertDialog.BUTTON_NEGATIVE, "关闭", (d, w) -> d.dismiss());
+                resultDialog.show();
+                styleAlertDialogDark(resultDialog);
+            } else {
+                // 竖屏模式 → 直接在页面内显示
+                ScrollView resultScroll = findViewById(imgSearchScrollId);
+                LinearLayout resultArea = findViewById(imgSearchResultAreaId);
+                TextView statusText = findViewById(imgSearchStatusId);
+                if (resultArea != null && resultScroll != null) {
+                    resultScroll.setVisibility(View.VISIBLE);
+                    resultArea.removeAllViews();
+                    for (LinearLayout card : cards) resultArea.addView(card);
+                }
+                if (statusText != null) {
+                    statusText.setVisibility(View.VISIBLE);
+                    statusText.setText("找到 " + cards.size() + " 个结果");
+                }
+            }
 
         } catch (Exception e) {
             String errMsg = "解析失败: " + e.toString();
