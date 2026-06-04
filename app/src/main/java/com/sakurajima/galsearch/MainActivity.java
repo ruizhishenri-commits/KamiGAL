@@ -221,6 +221,7 @@ private static final long MAX_PLAY_SESSION_MS = 12L * 60L * 60L * 1000L;
     private View[] portraitPages = new View[6];
     private SharedPreferences prefs;
     private int imgSearchPreviewId = -1;
+    private View imgSearchDialogRoot = null;
     private static final String PREFS_NAME = "yukihub_prefs";
     private static final String KEY_LAST_SCAN_ROOT_URI = "last_scan_root_uri";
     private static final String KEY_SCAN_ROOT_URIS = "scan_root_uris";
@@ -7829,13 +7830,15 @@ private void pauseBackgroundVideoIfNeeded() {
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this).create();
         dialog.setTitle("📷 识图识别Galgame");
         ScrollView scroll = new ScrollView(this);
+        imgSearchDialogRoot = scroll;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(16), dp(16), dp(16));
         buildImageSearchPage(root);
         scroll.addView(root);
         dialog.setView(scroll);
-        dialog.setButton(android.app.AlertDialog.BUTTON_NEGATIVE, "关闭", (d, w) -> d.dismiss());
+        dialog.setButton(android.app.AlertDialog.BUTTON_NEGATIVE, "关闭", (d, w) -> { imgSearchDialogRoot = null; d.dismiss(); });
+        dialog.setOnDismissListener(d -> imgSearchDialogRoot = null);
         dialog.show();
         styleAlertDialogDark(dialog);
     }
@@ -8119,24 +8122,54 @@ private void pauseBackgroundVideoIfNeeded() {
                         card.addView(tvHint);
                     }
 
-                    // 复制按钮
-                    TextView copyBtn = new TextView(this);
-                    copyBtn.setText("📋 复制");
-                    copyBtn.setTextColor(getColorCompat(R.color.yh_primary));
-                    copyBtn.setTextSize(11);
-                    copyBtn.setTypeface(null, android.graphics.Typeface.BOLD);
-                    copyBtn.setPadding(0, dp(6), 0, 0);
-                    copyBtn.setOnClickListener(v -> {
-                        String clipText = (copyWork.isEmpty() ? "" : copyWork)
-                            + (copyWork.isEmpty() || copyChar.isEmpty() ? "" : " - ")
-                            + (copyChar.isEmpty() ? "" : copyChar);
-                        if (!clipText.isEmpty()) {
-                            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                            cm.setPrimaryClip(android.content.ClipData.newPlainText("KamiGAL识图", clipText));
-                            showToast("已复制: " + clipText);
+                    // 复制按钮行
+                    LinearLayout copyRow = new LinearLayout(this);
+                    copyRow.setOrientation(LinearLayout.HORIZONTAL);
+                    copyRow.setPadding(0, dp(8), 0, 0);
+
+                    if (copyWork.isEmpty() && copyChar.isEmpty()) {
+                        // 都不复制
+                    } else {
+                        if (!copyWork.isEmpty()) {
+                            TextView copyWorkBtn = new TextView(this);
+                            copyWorkBtn.setText("📋 作品名");
+                            copyWorkBtn.setTextColor(getColorCompat(R.color.yh_primary));
+                            copyWorkBtn.setTextSize(11);
+                            copyWorkBtn.setTypeface(null, android.graphics.Typeface.BOLD);
+                            copyWorkBtn.setPadding(dp(8), dp(4), dp(8), dp(4));
+                            copyWorkBtn.setBackgroundDrawable(getDrawable(R.drawable.bg_input));
+                            copyWorkBtn.setLayoutParams(new LinearLayout.LayoutParams(-2, -2));
+                            copyWorkBtn.setOnClickListener(v -> {
+                                android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                                cm.setPrimaryClip(android.content.ClipData.newPlainText("KamiGAL识图", copyWork));
+                                showToast("已复制作品名");
+                            });
+                            copyRow.addView(copyWorkBtn);
                         }
-                    });
-                    card.addView(copyBtn);
+                        if (!copyChar.isEmpty()) {
+                            if (!copyWork.isEmpty()) {
+                                View spacer = new View(this);
+                                spacer.setLayoutParams(new LinearLayout.LayoutParams(dp(8), -1));
+                                copyRow.addView(spacer);
+                            }
+                            TextView copyCharBtn = new TextView(this);
+                            copyCharBtn.setText("📋 角色名");
+                            copyCharBtn.setTextColor(getColorCompat(R.color.yh_primary));
+                            copyCharBtn.setTextSize(11);
+                            copyCharBtn.setTypeface(null, android.graphics.Typeface.BOLD);
+                            copyCharBtn.setPadding(dp(8), dp(4), dp(8), dp(4));
+                            copyCharBtn.setBackgroundDrawable(getDrawable(R.drawable.bg_input));
+                            copyCharBtn.setLayoutParams(new LinearLayout.LayoutParams(-2, -2));
+                            copyCharBtn.setOnClickListener(v -> {
+                                android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                                cm.setPrimaryClip(android.content.ClipData.newPlainText("KamiGAL识图", copyChar));
+                                showToast("已复制角色名");
+                            });
+                            copyRow.addView(copyCharBtn);
+                        }
+                    }
+
+                    card.addView(copyRow);
 
                     root.addView(card);
                 }
@@ -8189,11 +8222,17 @@ private void pauseBackgroundVideoIfNeeded() {
             }
             final Bitmap finalBmp = bmp;
             runOnUiThread(() -> {
-                ImageView iv = findViewById(imgSearchPreviewId);
+                // 优先在对话框根视图中查找（横屏），否则在Activity视图树中查找（竖屏）
+                ImageView iv = null;
+                if (imgSearchDialogRoot != null) {
+                    iv = imgSearchDialogRoot.findViewById(imgSearchPreviewId);
+                }
+                if (iv == null) {
+                    iv = findViewById(imgSearchPreviewId);
+                }
                 if (iv != null) {
                     iv.setImageBitmap(finalBmp);
                     iv.setVisibility(View.VISIBLE);
-                    // 隐藏placeholder
                     ViewGroup parent = (ViewGroup) iv.getParent();
                     if (parent != null && parent.getChildCount() > 1) {
                         parent.getChildAt(1).setVisibility(View.GONE);
